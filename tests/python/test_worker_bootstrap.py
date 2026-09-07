@@ -448,6 +448,35 @@ class BundledRuntimeFallbackTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertFalse((self.user_envs / "active-runtime.json").exists())
 
+    def test_startup_bundled_activation_preserves_a_pointer_created_after_probe(self):
+        cpu_python = self.user_envs / "cpu" / "bin" / "python"
+        cpu_python.parent.mkdir(parents=True)
+        cpu_python.write_text("stub", encoding="utf-8")
+        active = self.user_envs / "active-runtime.json"
+        original_target = worker_bootstrap._target_runtime_from_payload
+
+        def target_then_user_activation(payload, backend):
+            target = original_target(payload, backend)
+            active.write_text(json.dumps({
+                "backend": "cpu",
+                "pythonPath": str(cpu_python),
+            }), encoding="utf-8")
+            return target
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.user_envs), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", active), \
+             mock.patch.object(worker_bootstrap, "BUNDLED_RUNTIME_ENVS_DIR", self.bundled_envs), \
+             mock.patch.object(worker_bootstrap, "_target_runtime_from_payload", side_effect=target_then_user_activation), \
+             mock.patch.object(sys, "platform", "darwin"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            result = worker_bootstrap.cmd_activate_runtime({
+                "backend": "mlx",
+                "pythonPath": str(self.bootstrap_python),
+                "onlyIfNoActive": True,
+            })
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(active.read_text(encoding="utf-8"))["backend"], "cpu")
+
 
 class RuntimeVenvRepairTests(unittest.TestCase):
     def test_posix_venv_home_uses_the_bootstrap_bin_directory(self):

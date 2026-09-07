@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   activeRuntimeEnvironment,
+  bundledRuntimeToActivate,
   detectRuntimePlatform,
   isKnownRuntimeBackend,
   preferredInstalledRuntimeBackend,
@@ -151,6 +152,38 @@ test('runtime core update is hidden for non-updatable bootstrap runtimes', () =>
 
 test('runtime core update is hidden when the installed version is newer than PyPI', () => {
   assert.equal(runtimeCoreUpdateAvailable({ pymssVersion: '2.0.20', pymssCoreVersion: '0.1.7' }, '2.0.19', '0.1.6'), false)
+})
+
+test('bundled runtime is selected for first-launch activation', () => {
+  const bundled = { backend: 'cpu', source: 'bundled', pythonPath: 'runtime-envs/cpu/Scripts/python.exe' }
+  assert.equal(bundledRuntimeToActivate({ ready: false, installedEnvironments: [bundled] }), bundled)
+  assert.equal(bundledRuntimeToActivate({ ready: true, installedEnvironments: [bundled] }), undefined)
+})
+
+test('first-launch activation does not guess between bundled environments or user environments', () => {
+  assert.equal(bundledRuntimeToActivate({
+    ready: false,
+    installedEnvironments: [
+      { backend: 'cpu', source: 'bundled', pythonPath: 'cpu/python.exe' },
+      { backend: 'cuda', source: 'bundled', pythonPath: 'cuda/python.exe' },
+    ],
+  }), undefined)
+  assert.equal(bundledRuntimeToActivate({
+    ready: false,
+    installedEnvironments: [{ backend: 'cpu', source: 'managed', pythonPath: 'cpu/python.exe' }],
+  }), undefined)
+})
+
+test('first-launch activation does not replace an active managed runtime that is not ready', () => {
+  assert.equal(bundledRuntimeToActivate({
+    ready: false,
+    installedBackend: 'cuda',
+    installState: { backend: 'cuda', pythonPath: 'cuda/Scripts/python.exe' },
+    installedEnvironments: [
+      { backend: 'cuda', source: 'managed', pythonPath: 'cuda/Scripts/python.exe' },
+      { backend: 'cpu', source: 'bundled', pythonPath: 'cpu/Scripts/python.exe', coreUpdateSupported: false },
+    ],
+  }), undefined)
 })
 
 test('runtime core sync is available for an older dependency manifest', () => {

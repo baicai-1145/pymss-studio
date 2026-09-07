@@ -55,19 +55,6 @@ find "$RUNTIME_DIR" -type d -name 'site-packages' -print0 |
       -name 'wheel-*' \
     \) -prune -exec rm -rf {} + || true
   done
-find "$RUNTIME_DIR" -type d \( -name '*.dist-info' -o -name '*.egg-info' \) -print0 |
-  while IFS= read -r -d '' meta_dir; do
-    find "$meta_dir" -maxdepth 1 -type f \( \
-      -name 'RECORD' -o \
-      -name 'WHEEL' -o \
-      -name 'entry_points.txt' -o \
-      -name 'INSTALLER' -o \
-      -name 'REQUESTED' -o \
-      -iname 'license' -o \
-      -iname 'licenses' \
-    \) -delete || true
-  done
-
 du -sh "$RUNTIME_DIR" || true
 
 # Note: keep stdlib pydoc/pydoc_data. SciPy imports pydoc from runtime code paths.

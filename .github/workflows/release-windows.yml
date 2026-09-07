@@ -124,6 +124,12 @@ jobs:
           "@ | Set-Content "$stage/README.txt" -Encoding UTF8
           $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR = (Resolve-Path "$stage/python-runtime/runtime-envs").Path
           $env:PYMSS_STUDIO_ACTIVE_RUNTIME_FILE = (Join-Path $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR "active-runtime.json")
+          $activeStatePath = Join-Path $stage "python-runtime/runtime-envs/active-runtime.json"
+          if (!(Test-Path $activeStatePath)) { throw "Staged CUDA active runtime state is missing" }
+          $activeState = Get-Content -Raw $activeStatePath | ConvertFrom-Json
+          if ($activeState.backend -ne "cuda") { throw "Staged CUDA active runtime backend is '$($activeState.backend)'" }
+          $activePython = Join-Path (Join-Path $stage "python-runtime/runtime-envs") $activeState.pythonPath
+          if (!(Test-Path $activePython)) { throw "Staged CUDA active runtime Python is missing: $activePython" }
           if (!(Test-Path "$stage\python-runtime\runtime-envs\cuda\Scripts\python.exe")) { throw "Staged CUDA Python executable is missing" }
           & "$stage\python-runtime\runtime-envs\cuda\Scripts\python.exe" -m pip --version
           if ($LASTEXITCODE -ne 0) { throw "Staged CUDA pip is missing" }
@@ -313,8 +319,14 @@ jobs:
           It is intended for users without NVIDIA CUDA GPUs.
           Users can switch backends or install additional environments in Settings.
           "@ | Set-Content "$stage/README.txt" -Encoding UTF8
-           $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR = (Resolve-Path "$stage/python-runtime/runtime-envs").Path
+          $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR = (Resolve-Path "$stage/python-runtime/runtime-envs").Path
           $env:PYMSS_STUDIO_ACTIVE_RUNTIME_FILE = (Join-Path $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR "active-runtime.json")
+          $activeStatePath = Join-Path $stage "python-runtime/runtime-envs/active-runtime.json"
+          if (!(Test-Path $activeStatePath)) { throw "Staged CPU active runtime state is missing" }
+          $activeState = Get-Content -Raw $activeStatePath | ConvertFrom-Json
+          if ($activeState.backend -ne "cpu") { throw "Staged CPU active runtime backend is '$($activeState.backend)'" }
+          $activePython = Join-Path (Join-Path $stage "python-runtime/runtime-envs") $activeState.pythonPath
+          if (!(Test-Path $activePython)) { throw "Staged CPU active runtime Python is missing: $activePython" }
           if (!(Test-Path "$stage\python-runtime\runtime-envs\cpu\Scripts\python.exe")) { throw "Staged CPU Python executable is missing" }
           & "$stage\python-runtime\runtime-envs\cpu\Scripts\python.exe" "$stage\python\worker.py" env_info
           if ($LASTEXITCODE -ne 0) { throw "Staged CPU env_info failed with exit code $LASTEXITCODE" }
@@ -636,6 +648,12 @@ jobs:
           "@ | Set-Content "$stage/README.txt" -Encoding UTF8
           $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR = (Resolve-Path "$stage/python-runtime/runtime-envs").Path
           $env:PYMSS_STUDIO_ACTIVE_RUNTIME_FILE = (Join-Path $env:PYMSS_STUDIO_RUNTIME_ENVS_DIR "active-runtime.json")
+          $activeStatePath = Join-Path $stage "python-runtime/runtime-envs/active-runtime.json"
+          if (!(Test-Path $activeStatePath)) { throw "Staged ROCm active runtime state is missing" }
+          $activeState = Get-Content -Raw $activeStatePath | ConvertFrom-Json
+          if ($activeState.backend -ne "rocm") { throw "Staged ROCm active runtime backend is '$($activeState.backend)'" }
+          $activePython = Join-Path (Join-Path $stage "python-runtime/runtime-envs") $activeState.pythonPath
+          if (!(Test-Path $activePython)) { throw "Staged ROCm active runtime Python is missing: $activePython" }
           if (!(Test-Path "$stage\python-runtime\runtime-envs\rocm\Scripts\python.exe")) { throw "Staged ROCm Python executable is missing" }
           & "$stage\python-runtime\runtime-envs\rocm\Scripts\python.exe" "$stage\python\worker.py" env_info
           if ($LASTEXITCODE -ne 0) { throw "Staged ROCm env_info failed" }

@@ -130,6 +130,10 @@ export const useAppStore = defineStore('app', () => {
   const workerEventConnectionError = ref('')
   const lastError = ref<string | null>(null)
   const runtimeInfo = ref<RuntimeInfo | null>(null)
+  // Runtime probes can overlap during startup (the shell and onboarding both check the
+  // environment). Keep a monotonic generation so an older response cannot overwrite newer
+  // activation state in the store.
+  let runtimeInfoRequestVersion = 0
   const runtimeInstallTaskId = ref<string | null>(null)
   const runtimeInstallStatus = ref<'idle' | 'installing' | 'success' | 'error' | 'cancelled'>('idle')
   const runtimeInstallBackend = ref<string | null>(null)
@@ -337,12 +341,15 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function checkRuntimeInfo(backend?: RuntimeBackend) {
+    const requestVersion = ++runtimeInfoRequestVersion
     if (!isTauriRuntime()) {
-      runtimeInfo.value = { ready: false, backend: backend || null, platform: navigator.platform }
-      return runtimeInfo.value
+      const result: RuntimeInfo = { ready: false, backend: backend || null, platform: navigator.platform }
+      if (requestVersion === runtimeInfoRequestVersion) runtimeInfo.value = result
+      return result
     }
-    runtimeInfo.value = await invoke<RuntimeInfo>('runtime_info', { payload: backend ? { backend } : {} })
-    return runtimeInfo.value
+    const result = await invoke<RuntimeInfo>('runtime_info', { payload: backend ? { backend } : {} })
+    if (requestVersion === runtimeInfoRequestVersion) runtimeInfo.value = result
+    return result
   }
 
   async function loadRuntimeCoreVersions() {
@@ -396,9 +403,20 @@ export const useAppStore = defineStore('app', () => {
     return taskId
   }
 
-  async function activateRuntime(backend: RuntimeBackend, target: { pythonPath?: string } = {}) {
-    await invoke('activate_runtime', { payload: { backend, ...target } })
-    await Promise.all([checkRuntimeInfo(), checkEnv(), loadRuntimeCoreVersions()])
+  async function activateRuntime(
+    backend: RuntimeBackend,
+    target: { pythonPath?: string } = {},
+    options: { refreshCoreVersions?: boolean; onlyIfNoActive?: boolean } = {},
+  ) {
+    const payload = {
+      backend,
+      ...target,
+      ...(options.onlyIfNoActive ? { onlyIfNoActive: true } : {}),
+    }
+    await invoke('activate_runtime', { payload })
+    const checks: Promise<unknown>[] = [checkRuntimeInfo(), checkEnv()]
+    if (options.refreshCoreVersions !== false) checks.push(loadRuntimeCoreVersions())
+    await Promise.all(checks)
   }
 
   async function cancelRuntimeInstall() {

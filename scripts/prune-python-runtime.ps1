@@ -68,13 +68,6 @@ if ($sitePackages -and (Test-Path -LiteralPath $sitePackages)) {
         Sort-Object FullName -Descending |
         ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
 
-    Get-ChildItem -LiteralPath $sitePackages -Recurse -Force -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match "(?i)\.dist-info$|\.egg-info$" } |
-        ForEach-Object {
-            Get-ChildItem -LiteralPath $_.FullName -Force -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -match '^(RECORD|WHEEL|entry_points\.txt|INSTALLER|REQUESTED|licenses?)$' } |
-                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
-        }
 }
 
 # Prune torch build metadata that is not needed at runtime.

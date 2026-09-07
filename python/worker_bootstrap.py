@@ -464,6 +464,54 @@ print(json.dumps(result, ensure_ascii=False))
         return {}
 
 
+def _runtime_core_missing_records(python_path: Path) -> dict[str, str]:
+    """Return core package versions whose wheel RECORD files were pruned or lost.
+
+    Older bundled runtimes intentionally removed most ``*.dist-info`` files to reduce
+    package size.  That makes pip unable to uninstall the old ``pymss`` distribution
+    during an in-place core update.  Inspect only the two packages managed by the core
+    update flow; never infer that a large accelerator package needs a reinstall.
+    """
+    if not python_path.is_file():
+        return {}
+    script = """
+import json
+from importlib import metadata
+
+result = {}
+for name in ("pymss", "pymss-core"):
+    try:
+        distribution = metadata.distribution(name)
+        record = distribution.read_text("RECORD")
+        if not record:
+            result[name] = distribution.version
+    except metadata.PackageNotFoundError:
+        pass
+print(json.dumps(result, ensure_ascii=False))
+"""
+    try:
+        output = subprocess.check_output(
+            [str(python_path), "-c", script],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+        data = json.loads(output.strip() or "{}")
+        if not isinstance(data, dict):
+            return {}
+        return {
+            name: str(version)
+            for name, version in data.items()
+            if name in {"pymss", "pymss-core"} and version
+        }
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # Metadata inspection is a repair aid.  If an old interpreter cannot answer,
+        # let the normal pip command produce its usual diagnostic instead.
+        return {}
+
+
 def _installed_envs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen_backends: set[str] = set()
@@ -908,10 +956,23 @@ def cmd_activate_runtime(payload: dict[str, Any]) -> int:
         from worker_protocol import emit_error
         return emit_error("RUNTIME_NOT_INSTALLED", f"Backend {backend} has no completed installation state")
     if _is_bundled_runtime_env(env_dir) or _is_bundled_bootstrap_python(python_path):
-        try:
-            ACTIVE_RUNTIME_FILE.unlink()
-        except FileNotFoundError:
-            pass
+        # Startup recovery is intentionally non-destructive.  The frontend may have inspected
+        # an empty pointer just before a user switched to a managed runtime.  In that mode leave
+        # the pointer untouched; the packaged active-runtime.json is the fallback for a genuinely
+        # empty user state, so no write or unlink is needed.
+        if payload.get("onlyIfNoActive"):
+            try:
+                if ACTIVE_RUNTIME_FILE.exists():
+                    return 0
+            except OSError:
+                # A permission failure is safer to treat as an existing user-owned pointer than
+                # to remove or replace it during startup recovery.
+                return 0
+        else:
+            try:
+                ACTIVE_RUNTIME_FILE.unlink()
+            except FileNotFoundError:
+                pass
         active = {
             **(state or {}),
             "backend": backend,
@@ -1402,16 +1463,23 @@ def cmd_update_runtime_core(payload: dict[str, Any]) -> int:
     )
     pymss_core_requirement = f"pymss-core=={target_pymss_core_version}"
     command.extend([pymss_requirement, pymss_core_requirement])
-    try:
-        _ensure_runtime_pip(python_path, task_id, append_log)
-        _emit("runtime_core_update_stage", {"stage": "pymss", "command": f"pip install --upgrade {pymss_requirement} {pymss_core_requirement}"}, task_id)
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=os.environ.copy())
+
+    def run_pip(command: list[str], stage: str) -> None:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=os.environ.copy(),
+        )
         assert process.stdout is not None
         try:
             for line in process.stdout:
                 message = line.rstrip()
-                append_log("pymss", message)
-                _emit("runtime_core_update_log", {"stage": "pymss", "message": message}, task_id)
+                append_log(stage, message)
+                _emit("runtime_core_update_log", {"stage": stage, "message": message}, task_id)
         except Exception:
             # Do not leave pip running after a broken event pipe.  Otherwise a failed update can
             # continue changing the environment and make the next click appear to repair it.
@@ -1419,8 +1487,51 @@ def cmd_update_runtime_core(payload: dict[str, Any]) -> int:
                 process.kill()
             process.wait()
             raise
+        finally:
+            close_stdout = getattr(process.stdout, "close", None)
+            if close_stdout:
+                close_stdout()
         if process.wait() != 0:
-            raise RuntimeError(f"pip failed with exit code {process.returncode}")
+            raise RuntimeError(f"pip failed during {stage} with exit code {process.returncode}")
+
+    try:
+        _ensure_runtime_pip(python_path, task_id, append_log)
+
+        # Releases before the metadata-preserving prune fix may have a working package but no
+        # RECORD file.  Pip refuses to uninstall such a distribution, so repair only these two
+        # small core packages from their currently installed versions before the real upgrade.
+        # ``--ignore-installed --no-deps`` is deliberately limited to this repair command: the
+        # normal update below keeps dependency resolution and the Torch constraint unchanged.
+        missing_records = _runtime_core_missing_records(python_path)
+        if missing_records:
+            repair_requirements = [
+                f"{name}=={missing_records[name]}"
+                for name in ("pymss", "pymss-core")
+                if name in missing_records
+            ]
+            repair_command = [
+                str(python_path), "-m", "pip", "install", "--ignore-installed", "--no-deps",
+                "--no-cache-dir", "--only-binary=:all:", "--prefer-binary",
+            ]
+            if index_url:
+                repair_command.extend(["--index-url", index_url])
+            repair_command.extend(repair_requirements)
+            repair_message = (
+                "Restoring pip installation metadata for "
+                + ", ".join(repair_requirements)
+            )
+            append_log("metadata", repair_message)
+            _emit("runtime_core_update_stage", {"stage": "metadata", "message": repair_message}, task_id)
+            run_pip(repair_command, "metadata")
+            remaining_records = _runtime_core_missing_records(python_path)
+            if remaining_records:
+                raise RuntimeError(
+                    "pip metadata repair did not restore RECORD for: "
+                    + ", ".join(sorted(remaining_records))
+                )
+
+        _emit("runtime_core_update_stage", {"stage": "pymss", "command": f"pip install --upgrade {pymss_requirement} {pymss_core_requirement}"}, task_id)
+        run_pip(command, "pymss")
         probed = _probe_python_runtime(python_path, _backend_extra_names(_manifest(), backend))
         if probed.get("pymssVersion") != target_pymss_version:
             raise RuntimeError(f"pymss stayed at {probed.get('pymssVersion') or 'unknown'} after update; expected {target_pymss_version}")

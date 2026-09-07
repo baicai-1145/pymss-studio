@@ -84,6 +84,29 @@ export function preferredInstalledRuntimeBackend(info: RuntimeInfo | null | unde
   return null
 }
 
+/**
+ * Return the single bundled runtime that should be made active on first launch.
+ *
+ * Packaged builds ship a completed environment alongside the bootstrap Python.  In
+ * that case the environment is usable immediately and should not require the user
+ * to open Settings and press the switch button.  User-managed environments are
+ * deliberately excluded, and multiple bundled environments remain ambiguous.
+ */
+export function bundledRuntimeToActivate(info: RuntimeInfo | null | undefined): InstalledRuntime | undefined {
+  if (info?.ready) return undefined
+  // Never replace an environment that is already recorded as active.  A managed
+  // runtime may be temporarily unready (for example after a failed package update),
+  // and activating the bundled fallback would silently delete the user's pointer.
+  const activeBackend = String(info?.installedBackend || info?.installState?.backend || '').trim()
+  if (activeBackend || info?.installState?.pythonPath) return undefined
+  const bundled = (info?.installedEnvironments || []).filter((entry) =>
+    (entry.source === 'bundled' || entry.coreUpdateSupported === false)
+      && isKnownRuntimeBackend(String(entry.backend || ''))
+      && Boolean(entry.pythonPath),
+  )
+  return bundled.length === 1 ? bundled[0] : undefined
+}
+
 export function runtimeCoreUpdateAvailable(
   env: InstalledRuntime | undefined,
   latestPymssVersion: string | null | undefined,
