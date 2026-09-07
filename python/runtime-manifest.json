@@ -25,6 +25,7 @@
         "linux",
         "darwin"
       ],
+      "minFreeDiskGB": 5,
       "torch": {
         "requirement": "torch==2.7.1",
         "indexUrl": "https://download.pytorch.org/whl/cpu"
@@ -35,6 +36,7 @@
         "win32",
         "linux"
       ],
+      "minFreeDiskGB": 10,
       "torch": {
         "requirement": "torch==2.7.1",
         "indexUrl": "https://download.pytorch.org/whl/cu128"
@@ -45,6 +47,7 @@
         "win32"
       ],
       "python": "3.12",
+      "minFreeDiskGB": 30,
       "torch": {
         "rocmRequirements": [
           "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
@@ -64,6 +67,7 @@
       "platforms": [
         "darwin"
       ],
+      "minFreeDiskGB": 4,
       "torch": {
         "requirement": "torch==2.7.1"
       },

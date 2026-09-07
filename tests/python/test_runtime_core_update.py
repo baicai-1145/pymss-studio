@@ -130,7 +130,6 @@ class RuntimeCoreUpdateTests(unittest.TestCase):
         upgrade_cmd = popen_calls[1]
         self.assertIn("--ignore-installed", repair_cmd)
         self.assertIn("--no-deps", repair_cmd)
-        self.assertIn("--no-cache-dir", repair_cmd)
         self.assertIn("--only-binary=:all:", repair_cmd)
         self.assertNotIn("--ignore-installed", upgrade_cmd)
         self.assertIn("--upgrade", upgrade_cmd)

@@ -3,6 +3,7 @@
 mod commands;
 mod error;
 mod model_dir_migration;
+mod paths;
 mod python;
 mod session_log;
 mod single_instance;

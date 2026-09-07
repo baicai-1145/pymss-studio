@@ -61,7 +61,10 @@ cookie.txt
 !README.md
 !README.zh-CN.md
 !CONTRIBUTING.md
-docs/
+docs/*
+!docs/adr/
+!docs/adr/*.md
+!docs/*.md
 .omc/
 .spec-workflow/
 
@@ -77,3 +80,7 @@ src-tauri/tauri.bundle.resources.json
 *.exe
 !src-tauri/icons/*.ico
 .uv-cache/
+
+# NFS/AppleDouble resource forks break builds (tauri permission files, workflows globs).
+# Must stay last: later rules win, and docs/*.md re-inclusion would otherwise match ._*.md
+._*

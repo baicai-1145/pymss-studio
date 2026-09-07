@@ -1,9 +1,22 @@
-# Development requirements for the desktop worker wrapper.
-# The core separation engine is distributed as the PyPI package `pymss`.
-# Install it with: python -m pip install pymss
+# Runtime dependency management for this project.
 #
-# This file documents the runtime modules the worker expects to be available
-# in the Python interpreter selected by PYMSS_STUDIO_PYTHON or by "python".
+# There is exactly ONE list that defines what the environments contain:
+# python/runtime-manifest.json. It is consumed by:
+#   - scripts/prepare-python-runtime.ps1 / .sh  (build-time bundled runtimes)
+#   - python/worker_bootstrap.py                (in-app environment installation)
+#   - .github/workflows/ci.yml                  (manifest sanity gate)
+#
+# Editing package versions here will NOT change what users get. Update the
+# manifest, and let the CI manifest gate catch inconsistencies.
+#
+# This file remains only as developer documentation for running the worker from
+# a source checkout (see CONTRIBUTING.md). Install with:
+#   python -m pip install -r python/requirements.txt
+#
+# The torch build depends on the chosen backend:
+#   cpu  -> pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cpu
+#   cuda -> pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
+#   macOS/mlx -> pip install torch==2.7.1 && pip install mlx
 
 av>=14
 librosa>=0.10.2
@@ -11,6 +24,5 @@ numpy>=1.26
 pysocks>=1.7.1
 requests>=2.32
 pyyaml>=6.0.1
-torch>=2.7.1
 tqdm>=4.60
 pymss

@@ -800,6 +800,123 @@ class InstallRecordsTheNewEnvironmentTests(unittest.TestCase):
         log = (env_dir / "pymss-runtime-install.log").read_text(encoding="utf-8")
         self.assertIn("existing environment has no pip; rebuilding the virtual environment", log)
 
+    def test_pymss_install_pins_torch_with_a_constraint_file(self):
+        """The core regression: --no-deps silently dropped dependencies the pymss core
+        package gained between releases. The pymss stage must resolve dependencies while a
+        constraint file keeps pip from swapping the installed torch build."""
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        commands: list[list[str]] = []
+        constraint_contents: list[str] = []
+
+        def popen(command, **kwargs):
+            del kwargs
+            commands.append(command)
+            if "--constraint" in command:
+                # Read while the file still exists: the install deletes it in its finally.
+                constraint_contents.append(Path(command[command.index("--constraint") + 1]).read_text(encoding="utf-8"))
+            return mock.Mock(stdout=iter(()), wait=mock.Mock(return_value=0), returncode=0, poll=mock.Mock(return_value=0))
+
+        def package_versions(_python_path, names):
+            return {"torch": "2.7.1+cpu"} if "torch" in names else {}
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", side_effect=self._probe), \
+             mock.patch.object(worker_bootstrap, "_probe_python_package_versions", side_effect=package_versions), \
+             mock.patch.object(worker_bootstrap.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen", side_effect=popen), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
+        pymss_cmd = next(command for command in commands if "pymss-core==0.1.6" in command)
+        self.assertIn("--constraint", pymss_cmd)
+        self.assertNotIn("--no-deps", pymss_cmd)
+        self.assertEqual(constraint_contents, ["torch==2.7.1+cpu\n"])
+        constraint_files = [Path(command[command.index("--constraint") + 1]) for command in commands if "--constraint" in command]
+        self.assertTrue(all(not path.exists() for path in constraint_files), "constraint file must be cleaned up")
+
+    def test_pymss_install_falls_back_to_no_deps_without_torch_metadata(self):
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        commands: list[list[str]] = []
+
+        def popen(command, **kwargs):
+            del kwargs
+            commands.append(command)
+            return mock.Mock(stdout=iter(()), wait=mock.Mock(return_value=0), returncode=0, poll=mock.Mock(return_value=0))
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", side_effect=self._probe), \
+             mock.patch.object(worker_bootstrap, "_probe_python_package_versions", return_value={}), \
+             mock.patch.object(worker_bootstrap.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen", side_effect=popen), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
+        pymss_cmd = next(command for command in commands if "pymss-core==0.1.6" in command)
+        self.assertIn("--no-deps", pymss_cmd)
+        self.assertNotIn("--constraint", pymss_cmd)
+
+    def test_install_rejects_a_backend_when_disk_space_is_exhausted(self):
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "minFreeDiskGB": 10, "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        events: list[tuple] = []
+
+        # The install failure surfaces through worker_protocol.emit_error, which writes to
+        # stdout directly instead of going through worker_bootstrap._emit.
+        def capture_emit(event_type, payload, request_id=None, task_id=None):
+            del request_id, task_id
+            events.append((event_type, payload))
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap.shutil, "disk_usage", return_value=mock.Mock(free=2 * 1024**3)), \
+             mock.patch("worker_protocol.emit", side_effect=capture_emit), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            result = worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"})
+
+        self.assertEqual(result, 1)
+        error_payload = next(payload for event, payload in events if event == "error")
+        self.assertEqual(error_payload["code"], "RUNTIME_INSTALL_FAILED")
+        self.assertIn("Insufficient disk space", error_payload["message"])
+
+    def test_install_proceeds_when_disk_has_enough_space(self):
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "minFreeDiskGB": 10, "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        pip = mock.Mock(return_value=mock.Mock(stdout=iter(()), wait=mock.Mock(return_value=0), returncode=0, poll=mock.Mock(return_value=0)))
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", side_effect=self._probe), \
+             mock.patch.object(worker_bootstrap, "_probe_python_package_versions", return_value={"torch": "2.7.1+cpu"}), \
+             mock.patch.object(worker_bootstrap.shutil, "disk_usage", return_value=mock.Mock(free=50 * 1024**3)), \
+             mock.patch.object(worker_bootstrap.subprocess, "run", return_value=mock.Mock(returncode=0)), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen", pip), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
 
 class PyPiMirrorSelectionTests(unittest.TestCase):
     def test_auto_uses_ustc_for_chinese_locale(self):

@@ -1,0 +1,47 @@
+name: Release Rehearsal
+
+# Runs the real release packaging end to end without publishing anything. Historically
+# the packaging steps were only ever executed on tag push, so PowerShell errors, tool
+# download changes, and staging bugs surfaced as broken releases. A green rehearsal
+# means the next tag is packaging-verified; a red one is a fix branch, not an incident.
+on:
+  workflow_dispatch:
+    inputs:
+      backends:
+        description: Comma-separated backends to rehearse
+        required: false
+        default: cpu
+  schedule:
+    # Weekly, Sunday 21:00 UTC — catches rot in downloads and runner images early.
+    - cron: '0 21 * * 0'
+
+concurrency:
+  group: release-rehearsal
+  cancel-in-progress: true
+
+jobs:
+  rehearse-windows:
+    name: Rehearse Windows ${{ matrix.backend }} release
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [cpu]
+    if: >-
+      github.event_name == 'schedule' ||
+      contains(github.event.inputs.backends || '', matrix.backend)
+    uses: ./.github/workflows/release-windows.yml
+    with:
+      version: 0.0.0-rehearsal.${{ github.run_number }}
+    permissions:
+      contents: read
+
+  rehearse-macos:
+    name: Rehearse macOS release
+    if: >-
+      github.event_name == 'schedule' ||
+      contains(github.event.inputs.backends || '', 'cpu')
+    uses: ./.github/workflows/release-macos.yml
+    with:
+      version: 0.0.0-rehearsal.${{ github.run_number }}
+    permissions:
+      contents: read

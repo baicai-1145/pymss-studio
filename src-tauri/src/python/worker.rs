@@ -430,7 +430,7 @@ fn build_worker_command(
     };
     let python_for_log = python.clone();
     let worker_for_log = worker.clone();
-    let mut cmd = Command::new(&python);
+    let mut cmd = Command::new(crate::paths::display_normalized(Path::new(&python)));
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.arg(worker)
@@ -438,10 +438,13 @@ fn build_worker_command(
         .env("PYTHONIOENCODING", "utf-8")
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .env("PYTHONUTF8", "1")
-        .env("PYMSS_STUDIO_BOOTSTRAP_PYTHON", &bootstrap_python)
+        .env(
+            "PYMSS_STUDIO_BOOTSTRAP_PYTHON",
+            crate::paths::display_normalized(Path::new(&bootstrap_python)),
+        )
         .env(
             "PYMSS_STUDIO_DEFAULT_OUTPUT_DIR",
-            default_output_dir(app)?.to_string_lossy().to_string(),
+            crate::paths::display_normalized(&default_output_dir(app)?),
         );
     if let Some(path) = session_log::log_env_path(app) {
         cmd.env("PYMSS_STUDIO_SESSION_LOG", path)
@@ -454,13 +457,22 @@ fn build_worker_command(
         cmd.env("PYMSS_STUDIO_PERSISTENT_LOG", path);
     }
     if let Ok(dir) = storage::runtime_envs_dir(app) {
-        cmd.env("PYMSS_STUDIO_RUNTIME_ENVS_DIR", dir.to_string_lossy().to_string());
+        cmd.env(
+            "PYMSS_STUDIO_RUNTIME_ENVS_DIR",
+            crate::paths::display_normalized(&dir),
+        );
     }
     if let Ok(file) = storage::active_runtime_file(app) {
-        cmd.env("PYMSS_STUDIO_ACTIVE_RUNTIME_FILE", file.to_string_lossy().to_string());
+        cmd.env(
+            "PYMSS_STUDIO_ACTIVE_RUNTIME_FILE",
+            crate::paths::display_normalized(&file),
+        );
     }
     if let Some(dir) = bundled_runtime_envs_dirs(app)?.first() {
-        cmd.env("PYMSS_STUDIO_BUNDLED_RUNTIME_ENVS_DIR", dir.to_string_lossy().to_string());
+        cmd.env(
+            "PYMSS_STUDIO_BUNDLED_RUNTIME_ENVS_DIR",
+            crate::paths::display_normalized(dir),
+        );
     }
     apply_proxy_env(app, &mut cmd);
     let mut tool_dirs = rocm_native_tool_dirs(app)?;
@@ -473,7 +485,10 @@ fn build_worker_command(
         let embedded = embedded_python_path(app)?;
         if let Some(embedded) = embedded {
             if let Some(runtime_root) = embedded.parent().and_then(|path| path.parent()) {
-                cmd.env("PYTHONHOME", runtime_root.to_string_lossy().to_string());
+                cmd.env(
+                    "PYTHONHOME",
+                    crate::paths::display_normalized(&runtime_root),
+                );
             }
         }
     }
@@ -499,6 +514,14 @@ fn build_worker_command(
     }
     if let Ok(dir) = storage::data_root_dir(app).map(|root| root.join("debug")) {
         cmd.env("PYMSS_STUDIO_DEBUG_DIR", dir.to_string_lossy().to_string());
+    }
+    // Shared pip wheel cache across every environment: a cancelled or failed install must not
+    // re-download multi-GB torch builds on retry. pip reads this standard variable natively.
+    if let Ok(dir) = storage::data_root_dir(app).map(|root| root.join("pip-cache")) {
+        cmd.env(
+            "PIP_CACHE_DIR",
+            crate::paths::display_normalized(&dir),
+        );
     }
     if let Some(path) = payload_file {
         cmd.arg("--payload").arg(path);

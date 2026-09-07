@@ -464,6 +464,44 @@ print(json.dumps(result, ensure_ascii=False))
         return {}
 
 
+def _torch_constraint_file(env_dir: Path, env_python: Path) -> Path | None:
+    """Write a torch-pinning constraints file for the pymss install stage.
+
+    Returns None when the just-installed torch metadata cannot be read; the caller then
+    falls back to the historical --no-deps install."""
+    versions = _probe_python_package_versions(env_python, ["torch"])
+    torch_version = versions.get("torch")
+    if not torch_version:
+        return None
+    path = env_dir / ".pymss-install-constraints.txt"
+    _atomic_write_text(path, f"torch=={torch_version}\n")
+    return path
+
+
+def _assert_disk_space(env_dir: Path, backend: str, spec: dict[str, Any]) -> None:
+    """Fail fast when the target drive cannot plausibly hold the environment.
+
+    A disk that fills mid-install leaves a multi-GB incomplete environment behind; checking
+    the free space up front turns that into one clear, recoverable error instead."""
+    try:
+        minimum = int(float(spec.get("minFreeDiskGB")))
+    except (TypeError, ValueError):
+        return
+    if minimum <= 0:
+        return
+    try:
+        anchor = env_dir.anchor or str(env_dir)
+        free = shutil.disk_usage(anchor).free
+    except OSError:
+        return
+    required = minimum * 1024**3
+    if free < required:
+        raise RuntimeError(
+            f"Insufficient disk space for the {backend} environment: "
+            f"{free / 1024**3:.1f} GiB free on {anchor}, at least {minimum} GiB required"
+        )
+
+
 def _runtime_core_missing_records(python_path: Path) -> dict[str, str]:
     """Return core package versions whose wheel RECORD files were pruned or lost.
 
@@ -1222,7 +1260,9 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
             file.write(f"[{stage}] {message}\n")
 
     def run_pip(args: list[str], stage: str, package_index: str | None = None) -> None:
-        command = [str(env_python), "-m", "pip", "install", "--no-cache-dir"]
+        # No --no-cache-dir: wheels are kept in PIP_CACHE_DIR (set by the desktop shell) so a
+        # cancelled or failed install does not re-download multi-GB torch builds on retry.
+        command = [str(env_python), "-m", "pip", "install"]
         if stage == "pymss":
             command.append("--upgrade")
         if stage in {"common", "pymss"}:
@@ -1261,6 +1301,7 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
             run_pip(args, stage, "https://pypi.org/simple")
 
     try:
+        _assert_disk_space(env_dir, backend, spec)
         install_log_path.write_text(
             f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] install backend={backend} mirror={mirror} manifest={manifest['manifestVersion']}\n",
             encoding="utf-8",
@@ -1274,23 +1315,15 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
             # ``\\\\?\\`` prefix into the config.  Normalize it before the first pip process
             # starts so fresh installs and repaired installs follow the same path rules.
             _repair_runtime_venv_config(env_dir)
-        elif not _runtime_python_works(env_python):
-            rebuild_message = "existing environment interpreter is unusable; rebuilding"
-            _emit("runtime_install_log", {"stage": "venv", "message": rebuild_message}, task_id)
-            import shutil
-            shutil.rmtree(env_dir, ignore_errors=True)
-            env_dir.mkdir(parents=True, exist_ok=True)
-            _create_runtime_venv(env_dir)
-            _repair_runtime_venv_config(env_dir)
-        elif not _runtime_pip_works(env_python):
-            # A cancelled or older portable install can leave a runnable venv without pip. The
-            # venv's ensurepip module may have been pruned already, so recreate it from the
-            # bootstrap runtime instead of failing the first package install.
-            rebuild_message = "existing environment has no pip; rebuilding the virtual environment"
-            _emit("runtime_install_log", {
-                "stage": "bootstrap",
-                "message": rebuild_message,
-            }, task_id)
+        elif not (_runtime_python_works(env_python) and _runtime_pip_works(env_python)):
+            # A cancelled or older portable install can leave a venv with a dead interpreter or
+            # without pip (its ensurepip module may even have been pruned). A venv is
+            # disposable: rebuild it from the bootstrap runtime instead of patching in place.
+            if _runtime_python_works(env_python):
+                rebuild_message = "existing environment has no pip; rebuilding the virtual environment"
+            else:
+                rebuild_message = "existing environment interpreter is unusable; rebuilding"
+            _emit("runtime_install_log", {"stage": "bootstrap", "message": rebuild_message}, task_id)
             import shutil
             shutil.rmtree(env_dir, ignore_errors=True)
             env_dir.mkdir(parents=True, exist_ok=True)
@@ -1310,7 +1343,25 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
         pymss_requirement = manifest["common"]["pymss"]
         pymss_core_requirement = manifest["common"]["pymss-core"]
         run_pip_with_pypi_fallback(common, "common")
-        run_pip_with_pypi_fallback(["--no-deps", pymss_requirement, pymss_core_requirement], "pymss")
+        # pymss is installed with full dependency resolution (the old --no-deps install silently
+        # dropped any dependency the core package gained between releases) plus a constraint
+        # pinning torch to the build installed one stage above, so pip can never swap the
+        # multi-GB accelerator build while resolving the core packages.
+        constraint_path = _torch_constraint_file(env_dir, env_python)
+        pymss_args: list[str] = []
+        if constraint_path:
+            pymss_args.extend(["--constraint", str(constraint_path)])
+        else:
+            pymss_args.append("--no-deps")
+        pymss_args.extend([pymss_requirement, pymss_core_requirement])
+        try:
+            run_pip_with_pypi_fallback(pymss_args, "pymss")
+        finally:
+            if constraint_path:
+                try:
+                    constraint_path.unlink()
+                except OSError:
+                    pass
         if spec.get("extras"):
             run_pip_with_pypi_fallback(list(spec["extras"]), "extras")
         # Probe the interpreter that was just built, not _runtime_info_payload(): that one reads
@@ -1449,7 +1500,7 @@ def cmd_update_runtime_core(payload: dict[str, Any]) -> int:
         return emit_error("RUNTIME_CORE_UPDATE_FAILED", "Unable to determine the installed Torch version; refusing to update the runtime core.", task_id=task_id, recoverable=True)
     constraints_path = env_dir / ".pymss-core-update-constraints.txt"
     _atomic_write_text(constraints_path, f"torch=={torch_version}\n")
-    command = [str(python_path), "-m", "pip", "install", "--upgrade", "--no-cache-dir", "--only-binary=:all:", "--prefer-binary"]
+    command = [str(python_path), "-m", "pip", "install", "--upgrade", "--only-binary=:all:", "--prefer-binary"]
     command.extend(["--constraint", str(constraints_path)])
     if index_url:
         command.extend(["--index-url", index_url])
@@ -1511,7 +1562,7 @@ def cmd_update_runtime_core(payload: dict[str, Any]) -> int:
             ]
             repair_command = [
                 str(python_path), "-m", "pip", "install", "--ignore-installed", "--no-deps",
-                "--no-cache-dir", "--only-binary=:all:", "--prefer-binary",
+                "--only-binary=:all:", "--prefer-binary",
             ]
             if index_url:
                 repair_command.extend(["--index-url", index_url])
