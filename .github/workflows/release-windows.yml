@@ -102,6 +102,10 @@ jobs:
           & curl.exe --location --fail --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 --output $vcRedist "https://aka.ms/vs/17/release/vc_redist.x64.exe"
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $vcRedist)) { throw "VC_redist.x64.exe download failed with exit code $LASTEXITCODE" }
 
+          # The pymss CLI bridge: a plain .cmd resolved against the active runtime at call time.
+          Copy-Item "scripts/cli-shims/pymss.cmd" "$bin/pymss.cmd" -Force
+          if (!(Test-Path "$bin/pymss.cmd")) { throw "pymss.cmd shim was not staged" }
+
       - name: Stage portable directory
         shell: pwsh
         run: |
@@ -299,6 +303,10 @@ jobs:
           & curl.exe --location --fail --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 --output $vcRedist "https://aka.ms/vs/17/release/vc_redist.x64.exe"
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $vcRedist)) { throw "VC_redist.x64.exe download failed with exit code $LASTEXITCODE" }
 
+          # The pymss CLI bridge: a plain .cmd resolved against the active runtime at call time.
+          Copy-Item "scripts/cli-shims/pymss.cmd" "$bin/pymss.cmd" -Force
+          if (!(Test-Path "$bin/pymss.cmd")) { throw "pymss.cmd shim was not staged" }
+
       - name: Stage portable directory
         shell: pwsh
         run: |
@@ -466,6 +474,10 @@ jobs:
           if (Test-Path $vcRedist) { Remove-Item $vcRedist -Force }
           & curl.exe --location --fail --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 --output $vcRedist "https://aka.ms/vs/17/release/vc_redist.x64.exe"
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $vcRedist)) { throw "VC_redist.x64.exe download failed with exit code $LASTEXITCODE" }
+
+          # The pymss CLI bridge: a plain .cmd resolved against the active runtime at call time.
+          Copy-Item "scripts/cli-shims/pymss.cmd" "$bin/pymss.cmd" -Force
+          if (!(Test-Path "$bin/pymss.cmd")) { throw "pymss.cmd shim was not staged" }
       - name: Stage online portable directory
         shell: pwsh
         run: |
@@ -621,6 +633,10 @@ jobs:
           if (Test-Path $vcRedist) { Remove-Item $vcRedist -Force }
           & curl.exe --location --fail --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 30 --max-time 600 --output $vcRedist "https://aka.ms/vs/17/release/vc_redist.x64.exe"
           if ($LASTEXITCODE -ne 0 -or !(Test-Path $vcRedist)) { throw "VC_redist.x64.exe download failed with exit code $LASTEXITCODE" }
+
+          # The pymss CLI bridge: a plain .cmd resolved against the active runtime at call time.
+          Copy-Item "scripts/cli-shims/pymss.cmd" "$bin/pymss.cmd" -Force
+          if (!(Test-Path "$bin/pymss.cmd")) { throw "pymss.cmd shim was not staged" }
       - name: Stage ROCm portable directory
         shell: pwsh
         run: |

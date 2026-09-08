@@ -196,6 +196,15 @@ copy_executable aria2c
 copy_dylib_graph
 copy_openssl_runtime
 
+# The pymss CLI bridge: a plain shell script, no Mach-O patching or signing needed.
+shim_source="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cli-shims/pymss"
+if [[ -f "$shim_source" ]]; then
+  install -m 755 "$shim_source" "$DEST_DIR/pymss"
+else
+  echo "pymss CLI shim not found next to prepare-macos-bundled-tools.sh" >&2
+  exit 1
+fi
+
 while IFS= read -r -d '' file; do
   if file -b "$file" | grep -q 'Mach-O'; then
     patch_macho_file "$file"

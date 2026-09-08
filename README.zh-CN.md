@@ -58,6 +58,20 @@ Pymss Studio 将 [`pymss`](https://github.com/pymss-project/pymss) 音乐源分�
 | Apple Silicon Mac，即 M1/M2/M3/M4 等 | macOS MLX |
 | Intel Mac | 当前没有对应发布版本 |
 
+### 命令行（pymss CLI）
+
+Windows 和 macOS 安装包在打包工具目录（`bin/`）里附带 `pymss` 桥接脚本。它在上游
+[pymss CLI](https://github.com/pymss-project/pymss) 的基础上，把命令运行在应用托管的环境里，
+并复用应用的模型缓存——GUI 下载过的模型 CLI 直接可用：
+
+```bash
+# Windows (cmd)：   <安装目录>\bin\pymss.cmd separate --input song.wav
+# macOS（终端）：    "/Applications/Pymss Studio.app/Contents/Resources/bin/pymss" --help
+```
+
+把 `bin/` 加入 PATH 即可直接使用 `pymss` 命令。桥接脚本在每次调用时动态解析当前环境，
+切换或重装 backend 不会导致命令失效。
+
 macOS 版本安装完成后，需要执行：
 
 ```bash

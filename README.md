@@ -58,6 +58,20 @@ Choose the package variant that matches your machine:
 | Apple Silicon Mac, including M1/M2/M3/M4 | macOS MLX |
 | Intel Mac | No dedicated release package currently |
 
+### Command line (pymss CLI)
+
+Windows and macOS packages ship a `pymss` bridge next to the bundled tools (`bin/`). It runs
+the upstream [pymss CLI](https://github.com/pymss-project/pymss) inside the app's managed
+environment and reuses its model cache, so anything downloaded by the GUI is visible to the CLI:
+
+```bash
+# Windows (cmd):   <install dir>\bin\pymss.cmd separate --input song.wav
+# macOS (Terminal): "/Applications/Pymss Studio.app/Contents/Resources/bin/pymss" --help
+```
+
+Add `bin/` to PATH for direct `pymss` access. The bridge resolves the active environment at
+call time — switching or reinstalling a backend never breaks it.
+
 On macOS, clear the quarantine attribute after installing the app:
 
 ```bash

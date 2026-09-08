@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Pymss Studio CLI bridge: run the pymss CLI inside the app's managed runtime.
+# The active environment is resolved at call time, so moving the app bundle,
+# switching backends, or reinstalling never breaks the command.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNTIME_ENVS="$SCRIPT_DIR/../python-runtime/runtime-envs"
+ACTIVE="$RUNTIME_ENVS/active-runtime.json"
+SYSTEM_PYTHON="$(command -v python3 || true)"
+
+PY=""
+if [[ -f "$ACTIVE" && -n "$SYSTEM_PYTHON" ]]; then
+  python_path="$("$SYSTEM_PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1])).get("pythonPath", ""))' "$ACTIVE" 2>/dev/null || true)"
+  if [[ -n "$python_path" && -x "$python_path" ]]; then
+    PY="$python_path"
+  fi
+fi
+if [[ -z "$PY" ]]; then
+  for env_dir in "$RUNTIME_ENVS"/*/; do
+    for candidate in "$env_dir/bin/python3" "$env_dir/bin/python"; do
+      if [[ -x "$candidate" ]]; then
+        PY="$candidate"
+        break 2
+      fi
+    done
+  done
+fi
+if [[ -z "$PY" ]]; then
+  echo "Pymss Studio: no managed runtime environment found. Start Pymss Studio once and install the dependencies first." >&2
+  exit 1
+fi
+
+# Share the app's model cache when it lives in the default location; a model directory the
+# user configured themselves wins. macOS keeps data in the roaming app-support directory.
+DATA_ROOT="$HOME/Library/Application Support/studio.pymss.desktop"
+if [[ -z "${PYMSS_MODEL_DIR:-}" && -d "$DATA_ROOT/models" ]]; then
+  export PYMSS_MODEL_DIR="$DATA_ROOT/models"
+fi
+if [[ -z "${PYMSS_USER_MODELS:-}" && -f "$DATA_ROOT/settings/user_models.json" ]]; then
+  export PYMSS_USER_MODELS="$DATA_ROOT/settings/user_models.json"
+fi
+
+exec "$PY" -m pymss "$@"
