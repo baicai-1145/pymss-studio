@@ -20,15 +20,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rehearse-windows:
-    name: Rehearse Windows ${{ matrix.backend }} release
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [cpu]
+  rehearse-windows-cpu:
+    name: Rehearse Windows cpu release
+    # Reusable-workflow call jobs may not reference matrix in their job-level if,
+    # so each rehearsed backend is its own explicit job.
     if: >-
       github.event_name == 'schedule' ||
-      contains(github.event.inputs.backends || '', matrix.backend)
+      contains(github.event.inputs.backends || '', 'cpu')
     uses: ./.github/workflows/release-windows.yml
     with:
       version: 0.0.0-rehearsal.${{ github.run_number }}

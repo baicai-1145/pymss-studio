@@ -93,8 +93,7 @@ jobs:
             exit 1
           fi
           version="${version#v}"
-          echo "RELEASE_TAG=v${version}" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=Pymss Studio v${version}" >> "$GITHUB_ENV"
+          { echo "RELEASE_TAG=v${version}"; echo "RELEASE_NAME=Pymss Studio v${version}"; } >> "$GITHUB_ENV"
           echo "RELEASE_VERSION=${version}" >> "$GITHUB_ENV"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           windows_result="${{ needs.windows.result }}"

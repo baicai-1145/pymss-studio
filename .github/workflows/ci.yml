@@ -21,13 +21,16 @@ jobs:
 
       - name: Validate GitHub Workflows
         run: |
+          # actionlint in CI implies a full schema + expression pass; it also catches the
+          # workflow-file mistakes that otherwise surface as opaque "workflow file issue"
+          # failures with no logs.
           bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
 
       - name: Shellcheck build scripts
         shell: bash
         run: |
-          # shellcheck implies a full bash syntax pass; it also catches the quoting and
+          # Running shellcheck also gives a full bash syntax pass; it catches the quoting and
           # word-splitting mistakes that only otherwise surface on the release runner.
           if ! command -v shellcheck >/dev/null 2>&1; then
             sudo apt-get update -qq

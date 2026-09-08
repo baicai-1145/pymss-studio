@@ -157,7 +157,7 @@ done
 TORCH_VERSION_INSTALLED="$(PYTHONHOME="$RUNTIME_HOME" "$PY" -c "from importlib.metadata import version; print(version('torch'))")"
 CONSTRAINTS_FILE="$(mktemp "${TMPDIR:-/tmp}/pymss-constraints.XXXXXX")"
 echo "torch==$TORCH_VERSION_INSTALLED" > "$CONSTRAINTS_FILE"
-PYMSS_REQUIREMENTS=($(manifest_query pymss-requirements))
+mapfile -t PYMSS_REQUIREMENTS < <(manifest_query pymss-requirements)
 # shellcheck disable=SC2207 disable=SC2086
 pip_install --upgrade --only-binary=:all: --prefer-binary --constraint "$CONSTRAINTS_FILE" ${PYMSS_REQUIREMENTS[@]+"${PYMSS_REQUIREMENTS[@]}"}
 rm -f "$CONSTRAINTS_FILE"
