@@ -1141,16 +1141,17 @@ class EnvironmentSizeTests(unittest.TestCase):
         self.assertEqual(list(self._emitted()["payload"]["sizes"]), ["cpu"])
 
     def test_removed_backend_leftovers_are_reported_as_reclaimable(self):
-        """ROCm support was removed; an environment left on disk by an older release must
-        surface in incompleteBackends so the UI can offer to reclaim its gigabytes."""
+        """An environment directory whose backend left the manifest (a legacy install from
+        an older release) must surface in incompleteBackends so the UI can offer to reclaim
+        its gigabytes instead of stranding them."""
         self._make_env("cpu", 1024)
-        rocm_dir = self.envs_dir / "rocm"
-        (rocm_dir / "Scripts").mkdir(parents=True, exist_ok=True)
-        (rocm_dir / "Scripts" / "python.exe").write_text("stub", encoding="utf-8")
+        legacy_dir = self.envs_dir / "legacy"
+        (legacy_dir / "Scripts").mkdir(parents=True, exist_ok=True)
+        (legacy_dir / "Scripts" / "python.exe").write_text("stub", encoding="utf-8")
         self.stdout = io.StringIO()
         with self._runtime():
             worker_bootstrap.cmd_runtime_env_sizes({})
-        self.assertIn("rocm", self._emitted()["payload"]["incompleteBackends"])
+        self.assertIn("legacy", self._emitted()["payload"]["incompleteBackends"])
 
     def test_size_targets_skip_the_bootstrap_interpreter(self):
         # The app's own runtime is not a removable environment and must not be measured.

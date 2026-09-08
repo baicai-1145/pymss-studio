@@ -1207,7 +1207,7 @@
     "runtimeInstallSizeHint": "约需下载 {size}。",
     "runtimeInstallActivatesHint": "安装后会自动切换，原有环境保留。",
     "runtimeMirrorLabel": "PyPI 依赖源",
-    "runtimeMirrorHint": "目标 PyPI 镜像源仅用于通用依赖；PyTorch CUDA 安装将回退使用 PyTorch 官方源。",
+    "runtimeMirrorHint": "目标 PyPI 镜像源仅用于通用依赖；PyTorch CUDA/ROCm 安装将回退使用 PyTorch 官方源。",
     "runtimeDetectSuccess": "环境检测完成",
     "runtimeInstallSuccess": "运行环境安装完成",
     "runtimeActivateSuccess": "已切换运行环境",
@@ -1445,7 +1445,7 @@
     "runtimeMirrorAliyun": "PyPI：阿里云镜像",
     "runtimeMirrorTencent": "PyPI：腾讯云镜像",
     "runtimeMirrorPypi": "PyPI：官方源",
-    "runtimeMirrorHint": "目标 PyPI 镜像源仅用于通用依赖；PyTorch CUDA 安装将回退使用 PyTorch 官方源。",
+    "runtimeMirrorHint": "目标 PyPI 镜像源仅用于通用依赖；PyTorch CUDA/ROCm 安装将回退使用 PyTorch 官方源。",
     "runtimeDriverHint": "GPU 后端需要匹配的驱动。如果安装或硬件检测失败，仍可使用 CPU 模式。",
     "runtimeInstalledTag": "已安装",
     "runtimeRecommendedTag": "推荐",
@@ -1459,7 +1459,8 @@
     "currentModelDir": "当前模型目录",
     "currentOutputDir": "默认输出目录",
     "dataDirReady": "默认目录会持久保存，可在设置页修改。",
-    "complete": "进入应用"
+    "complete": "进入应用",
+    "runtimeRocm": "适用于 Windows 11、匹配驱动和受支持的 AMD 显卡。需要 pymss 2.1.5 及以上。"
   },
   "toast": {
     "taskFailed": "分离任务启动失败",

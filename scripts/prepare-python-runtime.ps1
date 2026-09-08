@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("cuda", "default", "mps", "mlx")]
+    [ValidateSet("cuda", "default", "rocm", "mps", "mlx")]
     [string]$Variant = "cuda",
     [string]$Python = "python",
     [string]$RuntimeDir = "python-runtime",
@@ -66,7 +66,7 @@ function Resolve-BackendName {
     }
     # The mps/mlx build variants correspond to the manifest's mlx backend:
     # a CPU torch build plus the mlx extra.
-    $mapping = @{ cuda = "cuda"; default = "cpu"; mps = "mlx"; mlx = "mlx" }
+    $mapping = @{ cuda = "cuda"; default = "cpu"; rocm = "rocm"; mps = "mlx"; mlx = "mlx" }
     return $mapping[$Variant]
 }
 
@@ -103,18 +103,25 @@ function Install-BackendPackages {
     }
     $torch = $spec.torch
 
-    $torchRequirement = if (-not [string]::IsNullOrWhiteSpace($TorchVersionOverride)) {
-        "torch==$TorchVersionOverride"
-    } elseif ($torch.PSObject.Properties['requirement'] -and $torch.requirement) {
-        [string]$torch.requirement
+    if ($torch.PSObject.Properties['requirements'] -and $torch.requirements) {
+        # ROCm (pymss >= 2.1.5 recipe): AMD SDK + torch wheels are version-pinned URLs from
+        # repo.radeon.com; the manifest is authoritative. Dependency resolution stays ON —
+        # the torch wheels' deps (sympy, jinja2, ...) must come from the index.
+        Invoke-Pip -Python $Python -Arguments @($torch.requirements)
     } else {
-        "torch"
-    }
-    $indexUrl = Get-TorchIndexUrl -Override $TorchIndexUrlOverride -TorchSpec $torch
-    if ($indexUrl) {
-        Invoke-Pip -Python $Python -Arguments @($torchRequirement, '--index-url', $indexUrl)
-    } else {
-        Invoke-Pip -Python $Python -Arguments @($torchRequirement)
+        $torchRequirement = if (-not [string]::IsNullOrWhiteSpace($TorchVersionOverride)) {
+            "torch==$TorchVersionOverride"
+        } elseif ($torch.PSObject.Properties['requirement'] -and $torch.requirement) {
+            [string]$torch.requirement
+        } else {
+            "torch"
+        }
+        $indexUrl = Get-TorchIndexUrl -Override $TorchIndexUrlOverride -TorchSpec $torch
+        if ($indexUrl) {
+            Invoke-Pip -Python $Python -Arguments @($torchRequirement, '--index-url', $indexUrl)
+        } else {
+            Invoke-Pip -Python $Python -Arguments @($torchRequirement)
+        }
     }
 
     # Common dependencies come from the manifest (pymss/pymss-core excluded; they are

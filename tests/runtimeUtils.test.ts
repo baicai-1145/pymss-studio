@@ -201,6 +201,7 @@ test('runtime core sync stays hidden for bundled environments', () => {
 test('backend labels stay readable for unknown backends', () => {
   assert.equal(runtimeBackendLabel('mlx'), 'Apple MLX')
   assert.equal(runtimeBackendLabel('cuda'), 'NVIDIA CUDA')
+  assert.equal(runtimeBackendLabel('rocm'), 'AMD ROCm')
   assert.equal(runtimeBackendLabel('cpu'), 'CPU')
   assert.equal(runtimeBackendLabel('something-else'), 'SOMETHING-ELSE')
   assert.equal(runtimeBackendLabel(null), '')
@@ -214,13 +215,17 @@ test('backend recognition does not leak Object.prototype keys', () => {
 
 test('GPU vendor decides the recommended backend', () => {
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['nvidia'] }), 'cuda')
-  // ROCm support was removed — an AMD-only machine falls back to CPU.
-  assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd'] }), 'cpu')
+  // ROCm wheels are Windows-only in the manifest; an AMD machine elsewhere runs CPU.
+  assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd'] }), 'rocm')
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['intel'] }), 'cpu')
 })
 
-test('NVIDIA outranks AMD, and AMD is CPU everywhere', () => {
+test('a discrete NVIDIA card outranks an integrated AMD one', () => {
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd', 'nvidia'] }), 'cuda')
+})
+
+test('ROCm is never recommended off Windows', () => {
+  // The manifest restricts rocm to win32; the installer rejects it anywhere else.
   assert.equal(recommendedRuntimeBackend({ platform: 'linux', gpuVendors: ['amd'] }), 'cpu')
   assert.equal(recommendedRuntimeBackend({ platform: 'linux', gpuVendors: ['nvidia'] }), 'cuda')
 })
@@ -266,7 +271,7 @@ test('manifest status is unknown when either side did not record a version', () 
 })
 
 test('every shipped backend has its own download size hint', () => {
-  const hints = ['cpu', 'cuda', 'mlx'].map(runtimeSizeHint)
+  const hints = ['cpu', 'cuda', 'rocm', 'mlx'].map(runtimeSizeHint)
   assert.equal(new Set(hints).size, hints.length)
   assert.equal(runtimeSizeHint('unknown-backend'), '~1 GB')
 })

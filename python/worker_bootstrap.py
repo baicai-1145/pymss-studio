@@ -937,6 +937,7 @@ def _runtime_info_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "ready": all(v for k, v in packages.items() if k != "mlx" or backend == "mlx") and torch_backend != "missing" and not torch_backend.startswith("error:") and (
             not backend or backend == "cpu" and torch_backend == "cpu"
             or backend == "cuda" and torch_backend == "cuda" and accelerator_available
+            or backend == "rocm" and torch_backend == "rocm" and accelerator_available
             or backend == "mlx" and packages.get("mlx", False)
         ),
     }

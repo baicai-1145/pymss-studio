@@ -32,7 +32,7 @@ export type EnvInfo = {
   librosaAvailable?: boolean
 }
 
-export type RuntimeBackend = 'cpu' | 'cuda' | 'mlx'
+export type RuntimeBackend = 'cpu' | 'cuda' | 'rocm' | 'mlx'
 export type RuntimeInfo = {
   manifestVersion?: string
   pythonVersion?: string
@@ -183,7 +183,7 @@ export const useAppStore = defineStore('app', () => {
         level: env.cudaAvailable || env.mpsAvailable || env.mlxAvailable ? 'ok' : 'warn',
         label: 'Accelerator',
         value: env.cudaAvailable
-          ? `CUDA (${env.cudaDeviceCount || 0})`
+          ? `${env.torchBackend === 'rocm' ? 'ROCm' : 'CUDA'} (${env.cudaDeviceCount || 0})`
           : env.mlxAvailable
               ? 'MLX'
               : env.mpsAvailable
@@ -225,7 +225,7 @@ export const useAppStore = defineStore('app', () => {
     if (!info?.ready) return false
     if (backend === 'mlx') return Boolean(info.packages?.mlx)
     if (info.torchBackend !== backend) return false
-    if (backend === 'cuda') return Boolean(info.acceleratorAvailable)
+    if (backend === 'cuda' || backend === 'rocm') return Boolean(info.acceleratorAvailable)
     return true
   }
 

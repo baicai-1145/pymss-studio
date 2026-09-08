@@ -48,15 +48,6 @@ spike 验收清单：离线分发（uv 二进制必须内置）、
 恶劣路径矩阵（非 ASCII / 空格 / 超长路径）、取消重装、`pyvenv.cfg` relocatability。
 
 
-### 后记（2026-09）：ROCm 后端已移除
+### 后记（2026-09）：ROCm 后端先移除、后随上游 v2.1.5 重新引入
 
-上游 pymss 从未测试过 ROCm 构建的 torch（无 CI 矩阵、无基准、README 不声明支持）。下游把 ROCm 做成正式 backend 属于无背书的功能扩散，维护成本（AMD 直发 URL、SDK 工具注入、30 GB 阈值）远超价值。本分支将其整体移除：安装入口、探测、打包脚本、安装器全部摘除；用户机器上的遗留 ROCm 环境会作为可回收空间呈现。若上游未来验证 ROCm，再以受支持的方式重新引入。
-
-## 后果
-
-- 正面：修复面收敛到源头，防御层减少；构建与用户安装共享同一解析策略；
-  CI 在 push 时即可发现"发版时才会炸"的脚本错误。
-- 负面：`pymss` 新增依赖若与已装 torch 冲突，安装会显式失败（此前是静默坏
-  环境）——这是有意为之，失败信息会指向具体冲突。
-- 中性：用户已装的旧环境不会追溯获得 pysocks 等缺失依赖，重装或核心更新时
-  补齐。
+上游 pymss 一度未测试 ROCm（无 CI 矩阵、无基准、README 不声明），下游自建 ROCm backend 属于无背书的功能扩散，故先行移除。pymss v2.1.5 正式加入 ROCm 支持：`device="rocm"` 设备别名映射到 cuda 路径、官方 Windows 安装配方（repo.radeon.com 的 3 个 SDK wheel + torch 2.9.1+rocm7.2.1）、AOTriton SDPA 注意力路径。本分支据此重新引入 ROCm backend，配置完全对齐上游官方配方，并修正旧配置的缺陷：不再对 SDK/torch wheel 使用 `--no-deps`（旧配置会导致 torch 的 sympy/jinja2/networkx 等依赖缺失，torch 导入即失败）。当前 ROCm 仅支持通过应用内在线安装（Windows；Linux 依赖系统级 ROCm 驱动，超出 pip 可安装范围）。

@@ -1207,7 +1207,7 @@
     "runtimeInstallSizeHint": "About {size} to download.",
     "runtimeInstallActivatesHint": "Becomes active once installed; existing environments are kept.",
     "runtimeMirrorLabel": "PyPI package source",
-    "runtimeMirrorHint": "The selected PyPI mirror is used for general dependencies only; PyTorch CUDA installation falls back to the official PyTorch repository.",
+    "runtimeMirrorHint": "The selected PyPI mirror is used for general dependencies only; PyTorch CUDA/ROCm installation falls back to the official PyTorch repository.",
     "runtimeDetectSuccess": "Environment detection completed",
     "runtimeInstallSuccess": "Runtime environment installed successfully",
     "runtimeActivateSuccess": "Runtime environment switched",
@@ -1445,7 +1445,7 @@
     "runtimeMirrorAliyun": "PyPI: Aliyun mirror",
     "runtimeMirrorTencent": "PyPI: Tencent mirror",
     "runtimeMirrorPypi": "PyPI: Official",
-    "runtimeMirrorHint": "The selected PyPI mirror is used for general dependencies only; PyTorch CUDA installation falls back to the official PyTorch repository.",
+    "runtimeMirrorHint": "The selected PyPI mirror is used for general dependencies only; PyTorch CUDA/ROCm installation falls back to the official PyTorch repository.",
     "runtimeDriverHint": "GPU backends require a compatible driver. CPU mode remains available if installation or hardware checks fail.",
     "runtimeInstalledTag": "Installed",
     "runtimeRecommendedTag": "Recommended",
@@ -1459,7 +1459,8 @@
     "currentModelDir": "Current model directory",
     "currentOutputDir": "Default output directory",
     "dataDirReady": "Default directories are saved persistently and can be changed in Settings.",
-    "complete": "Enter App"
+    "complete": "Enter App",
+    "runtimeRocm": "For supported AMD GPUs on Windows 11 with the matching driver. Requires pymss 2.1.5+."
   },
   "toast": {
     "taskFailed": "Failed to start separation task",

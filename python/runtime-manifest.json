@@ -15,8 +15,8 @@
     "requests": "requests>=2.32,<3",
     "pyyaml": "pyyaml>=6.0.1,<7",
     "tqdm": "tqdm>=4.60,<5",
-    "pymss": "pymss[proxy]>=2.1.3",
-    "pymss-core": "pymss-core>=0.1.6"
+    "pymss": "pymss[proxy]>=2.1.5",
+    "pymss-core": "pymss-core>=0.1.8"
   },
   "backends": {
     "cpu": {
@@ -40,6 +40,23 @@
       "torch": {
         "requirement": "torch==2.7.1",
         "indexUrl": "https://download.pytorch.org/whl/cu128"
+      }
+    },
+    "rocm": {
+      "platforms": [
+        "win32"
+      ],
+      "python": "3.12",
+      "minFreeDiskGB": 30,
+      "torch": {
+        "requirements": [
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+          "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl"
+        ]
       }
     },
     "mlx": {

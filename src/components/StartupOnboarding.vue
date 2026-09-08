@@ -71,6 +71,7 @@ const runtimeBackendChoices = computed(() => {
   if (!isMac) {
     items.push(
       { value: 'cuda', label: runtimeBackendName('cuda'), hint: t('onboarding.runtimeCuda') },
+      { value: 'rocm', label: runtimeBackendName('rocm'), hint: t('onboarding.runtimeRocm') },
     )
   }
   if (isAppleSilicon) {

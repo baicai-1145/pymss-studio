@@ -206,7 +206,7 @@ fn is_bundled_runtime_python_path(file: &Path, python_path: &str) -> AppResult<b
     let content = std::fs::read_to_string(file)?;
     let record: ActiveRuntimeRecord = serde_json::from_str(&content)?;
     let backend = record.backend.unwrap_or_default().trim().to_ascii_lowercase();
-    if !matches!(backend.as_str(), "cpu" | "cuda" | "mlx") {
+    if !matches!(backend.as_str(), "cpu" | "cuda" | "rocm" | "mlx") {
         return Ok(false);
     }
     let Some(envs_dir) = file.parent() else {
@@ -245,7 +245,7 @@ fn active_path_backend_matches(file: &Path, python_path: &str) -> bool {
     let Some(backend) = record.backend.filter(|value| !value.trim().is_empty()) else {
         return false;
     };
-    if !matches!(backend.trim().to_ascii_lowercase().as_str(), "cpu" | "cuda" | "mlx") {
+    if !matches!(backend.trim().to_ascii_lowercase().as_str(), "cpu" | "cuda" | "rocm" | "mlx") {
         return false;
     }
     let path = PathBuf::from(python_path);

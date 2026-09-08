@@ -430,10 +430,12 @@ export const useSettingsStore = defineStore('settings', () => {
       { label: 'Auto (优先使用可用显卡)', value: 'auto', type: 'auto' },
       { label: 'CPU', value: 'cpu', type: 'cpu', deviceIds: [0] },
     ]
-    // Each CUDA device gets its own value: sharing one across cards would make every card
-    // past the first unselectable and pin inference to GPU 0.
-    const gpuKind = 'cuda'
-    const gpuName = 'CUDA'
+    // A ROCm build reports its GPUs through torch's cuda API, so they arrive in cudaDevices and
+    // only the naming differs. Each device still gets its own value: sharing one across cards
+    // would make every card past the first unselectable and pin inference to GPU 0.
+    const isRocm = env?.torchBackend === 'rocm'
+    const gpuKind = isRocm ? 'rocm' : 'cuda'
+    const gpuName = isRocm ? 'ROCm' : 'CUDA'
     for (const gpu of env?.cudaDevices || []) {
       const memory = gpu.totalMemoryBytes
         ? ` · ${(gpu.totalMemoryBytes / 1024 / 1024 / 1024).toFixed(1)} GB`
