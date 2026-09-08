@@ -201,7 +201,6 @@ test('runtime core sync stays hidden for bundled environments', () => {
 test('backend labels stay readable for unknown backends', () => {
   assert.equal(runtimeBackendLabel('mlx'), 'Apple MLX')
   assert.equal(runtimeBackendLabel('cuda'), 'NVIDIA CUDA')
-  assert.equal(runtimeBackendLabel('rocm'), 'AMD ROCm')
   assert.equal(runtimeBackendLabel('cpu'), 'CPU')
   assert.equal(runtimeBackendLabel('something-else'), 'SOMETHING-ELSE')
   assert.equal(runtimeBackendLabel(null), '')
@@ -215,16 +214,13 @@ test('backend recognition does not leak Object.prototype keys', () => {
 
 test('GPU vendor decides the recommended backend', () => {
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['nvidia'] }), 'cuda')
-  assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd'] }), 'rocm')
+  // ROCm support was removed — an AMD-only machine falls back to CPU.
+  assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd'] }), 'cpu')
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['intel'] }), 'cpu')
 })
 
-test('a discrete NVIDIA card outranks an integrated AMD one', () => {
+test('NVIDIA outranks AMD, and AMD is CPU everywhere', () => {
   assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: ['amd', 'nvidia'] }), 'cuda')
-})
-
-test('ROCm is never recommended off Windows', () => {
-  // The manifest restricts rocm to win32; the installer rejects it anywhere else.
   assert.equal(recommendedRuntimeBackend({ platform: 'linux', gpuVendors: ['amd'] }), 'cpu')
   assert.equal(recommendedRuntimeBackend({ platform: 'linux', gpuVendors: ['nvidia'] }), 'cuda')
 })
@@ -237,9 +233,17 @@ test('macOS is decided by architecture, not by GPU vendor', () => {
 test('undetectable hardware yields no recommendation at all', () => {
   // null means "no opinion" — the UI must keep offering every backend, because a missed
   // card would otherwise lock a user out of the backend they actually need.
-  assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: [] }), null)
-  assert.equal(recommendedRuntimeBackend({ platform: 'win32' }), null)
-  assert.equal(recommendedRuntimeBackend(null), null)
+  // detectRuntimePlatform falls back to navigator.platform when no info was reported; pin
+  // it so the host OS (node reports 'MacIntel' on macOS) cannot flip the null-info case.
+  const originalNavigator = globalThis.navigator
+  Object.defineProperty(globalThis, 'navigator', { value: { platform: 'Win32' }, configurable: true })
+  try {
+    assert.equal(recommendedRuntimeBackend({ platform: 'win32', gpuVendors: [] }), null)
+    assert.equal(recommendedRuntimeBackend({ platform: 'win32' }), null)
+    assert.equal(recommendedRuntimeBackend(null), null)
+  } finally {
+    Object.defineProperty(globalThis, 'navigator', { value: originalNavigator, configurable: true })
+  }
 })
 
 test('manifest status compares the environment against the shipped manifest', () => {
@@ -262,7 +266,7 @@ test('manifest status is unknown when either side did not record a version', () 
 })
 
 test('every shipped backend has its own download size hint', () => {
-  const hints = ['cpu', 'cuda', 'rocm', 'mlx'].map(runtimeSizeHint)
+  const hints = ['cpu', 'cuda', 'mlx'].map(runtimeSizeHint)
   assert.equal(new Set(hints).size, hints.length)
   assert.equal(runtimeSizeHint('unknown-backend'), '~1 GB')
 })

@@ -25,7 +25,6 @@ INITIAL_BACKEND="${INITIAL_BACKEND:-}"
 case "$VARIANT" in
   cuda) BACKEND="cuda" ;;
   default) BACKEND="cpu" ;;
-  rocm) BACKEND="rocm" ;;
   mps | mlx) BACKEND="mlx" ;;
   *) BACKEND="cpu" ;;
 esac
@@ -75,12 +74,6 @@ elif query == "pymss-requirements":
 elif query == "extras":
     for extra in backend.get("extras", []):
         print(extra)
-elif query == "rocm-sdk-requirements":
-    for url in torch.get("rocmRequirements", []):
-        print(url)
-elif query == "rocm-torch-requirements":
-    for url in torch.get("requirements", []):
-        print(url)
 else:
     raise SystemExit(f"unknown manifest query: {query}")
 PYEOF
@@ -108,33 +101,23 @@ pip_install() {
 }
 
 # --- torch ------------------------------------------------------------------
-if [[ "$BACKEND" == "rocm" ]]; then
-  # shellcheck disable=SC2207
-  ROCM_SDK_URLS=($(manifest_query rocm-sdk-requirements))
-  # shellcheck disable=SC2207
-  ROCM_TORCH_URLS=($(manifest_query rocm-torch-requirements))
-  # shellcheck disable=SC2086
-  pip_install ${ROCM_SDK_URLS[@]+"${ROCM_SDK_URLS[@]}"}
-  pip_install --no-deps ${ROCM_TORCH_URLS[@]+"${ROCM_TORCH_URLS[@]}"}
+if [[ -n "$TORCH_VERSION" ]]; then
+  TORCH_REQUIREMENT="torch==${TORCH_VERSION}"
 else
-  if [[ -n "$TORCH_VERSION" ]]; then
-    TORCH_REQUIREMENT="torch==${TORCH_VERSION}"
-  else
-    TORCH_REQUIREMENT="$(manifest_query torch-requirement)"
-  fi
-  if [[ -z "$TORCH_REQUIREMENT" ]]; then
-    TORCH_REQUIREMENT="torch"
-  fi
-  if [[ -n "$TORCH_INDEX_URL" ]]; then
-    TORCH_INDEX="$TORCH_INDEX_URL"
-  else
-    TORCH_INDEX="$(manifest_query torch-index-url)"
-  fi
-  if [[ -n "$TORCH_INDEX" ]]; then
-    pip_install "$TORCH_REQUIREMENT" --index-url "$TORCH_INDEX"
-  else
-    pip_install "$TORCH_REQUIREMENT"
-  fi
+  TORCH_REQUIREMENT="$(manifest_query torch-requirement)"
+fi
+if [[ -z "$TORCH_REQUIREMENT" ]]; then
+  TORCH_REQUIREMENT="torch"
+fi
+if [[ -n "$TORCH_INDEX_URL" ]]; then
+  TORCH_INDEX="$TORCH_INDEX_URL"
+else
+  TORCH_INDEX="$(manifest_query torch-index-url)"
+fi
+if [[ -n "$TORCH_INDEX" ]]; then
+  pip_install "$TORCH_REQUIREMENT" --index-url "$TORCH_INDEX"
+else
+  pip_install "$TORCH_REQUIREMENT"
 fi
 
 # --- common dependencies (requirement strings from the manifest) ------------

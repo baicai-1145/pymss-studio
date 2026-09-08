@@ -379,12 +379,23 @@ def _incomplete_env_backends(manifest: dict[str, Any]) -> list[str]:
 
     An interrupted or failed install leaves the venv behind (state is only written on
     success), so these directories can hold gigabytes while not counting as installed.
-    Reporting them is what lets the UI offer to reclaim the space."""
+    Reporting them is what lets the UI offer to reclaim the space. Backends removed from
+    the manifest entirely (ROCm) are treated the same way: the leftover environment is
+    dead weight the UI can offer to delete."""
+    manifest_backends = manifest.get("backends", {})
+    leftovers = [
+        entry.name
+        for entry in RUNTIME_ENVS_DIR.iterdir()
+        if entry.is_dir()
+        and not entry.name.startswith(".")
+        and entry.name not in manifest_backends
+        and _env_python_path(entry.name).is_file()
+    ]
     return [
         backend
-        for backend in manifest.get("backends", {})
+        for backend in manifest_backends
         if _env_python_path(backend).is_file() and not _read_installed_env_state(backend)
-    ]
+    ] + leftovers
 
 
 def _env_size_targets(manifest: dict[str, Any]) -> dict[str, Path]:
@@ -926,7 +937,6 @@ def _runtime_info_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "ready": all(v for k, v in packages.items() if k != "mlx" or backend == "mlx") and torch_backend != "missing" and not torch_backend.startswith("error:") and (
             not backend or backend == "cpu" and torch_backend == "cpu"
             or backend == "cuda" and torch_backend == "cuda" and accelerator_available
-            or backend == "rocm" and torch_backend == "rocm" and accelerator_available
             or backend == "mlx" and packages.get("mlx", False)
         ),
     }
@@ -1353,8 +1363,6 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
         _emit("runtime_install_started", {"backend": backend, "manifestVersion": manifest["manifestVersion"], "logPath": str(install_log_path)}, task_id)
         _ensure_runtime_pip(env_python, task_id, append_log)
         torch = spec.get("torch", {})
-        if torch.get("rocmRequirements"):
-            run_pip(list(torch["rocmRequirements"]), "rocm-sdk", None)
         torch_args = list(torch.get("requirements", [])) if torch.get("requirements") else [torch["requirement"]]
         run_pip((["--no-deps"] if torch.get("noDeps") else []) + torch_args, "torch", torch.get("indexUrl"))
         common = [value for name, value in manifest["common"].items() if name not in {"pymss", "pymss-core"}]

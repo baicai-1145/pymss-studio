@@ -28,7 +28,6 @@ def _manifest():
         "backends": {
             "cpu": {"platforms": ["win32", "linux", "darwin"], "torch": {"requirement": "torch==2.7.1"}},
             "cuda": {"platforms": ["win32", "linux"], "torch": {"requirement": "torch==2.7.1+cu128"}},
-            "rocm": {"platforms": ["win32", "linux"], "torch": {"requirement": "torch==2.7.1+rocm6.3"}},
             "mlx": {"platforms": ["darwin"], "torch": {"requirement": "torch==2.7.1"}},
         },
     }
@@ -36,16 +35,18 @@ def _manifest():
 
 def _probe_result(backend: str) -> dict[str, object]:
     torch_backend = "cpu" if backend == "mlx" else backend
+    # "rocm" is not a manifest backend anymore; the fallback keeps legacy-environment
+    # fixtures (state files written by older releases) representable.
+    torch_version = {
+        "cpu": "2.7.1",
+        "cuda": "2.7.1+cu128",
+        "mlx": "2.7.1",
+    }.get(backend, "2.7.1+rocm6.3")
     return {
         "pythonVersion": "3.12.0",
-        "torchVersion": {
-            "cpu": "2.7.1",
-            "cuda": "2.7.1+cu128",
-            "rocm": "2.7.1+rocm6.3",
-            "mlx": "2.7.1",
-        }[backend],
+        "torchVersion": torch_version,
         "torchBackend": torch_backend,
-        "acceleratorAvailable": backend in {"cuda", "rocm"},
+        "acceleratorAvailable": backend == "cuda",
         "packages": {name: True for name in COMMON_PACKAGES},
         "packageVersions": {name: "2.0.0" for name in COMMON_PACKAGES},
         "pymssVersion": "2.1.4",
@@ -145,8 +146,32 @@ class RuntimeCoreUpdateTests(unittest.TestCase):
         self.assertNotIn("--ignore-installed", popen_calls[0])
         self.assertIn("--upgrade", popen_calls[0])
 
-    def test_update_core_does_not_continue_when_repair_remains_incomplete(self):
+    def test_update_core_rejects_a_rocm_environment(self):
+        """ROCm is no longer an installable backend (upstream pymss never tested it); a
+        leftover ROCm environment from an older release must fail closed with the standard
+        unsupported-backend error instead of being updated in place."""
         env_dir, python_path = self._make_env("rocm")
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=_manifest()), \
+             mock.patch.object(worker_bootstrap, "_latest_pypi_version", side_effect=lambda name: {"pymss": "2.1.4", "pymss-core": "0.1.6"}[name]), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", return_value=_probe_result("rocm")), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen"), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()) as captured:
+            result = worker_bootstrap.cmd_update_runtime_core({"backend": "rocm", "mirror": "pypi", "pythonPath": str(python_path)})
+
+        self.assertNotEqual(result, 0)
+        self.assertIn("RUNTIME_BACKEND_UNSUPPORTED", captured.getvalue())
+        # Nothing was touched: no pip run, no state rewrite.
+        self.assertEqual(
+            json.loads((env_dir / "pymss-runtime-state.json").read_text(encoding="utf-8"))["pymssVersion"],
+            "2.1.3",
+        )
+
+    def test_update_core_does_not_continue_when_repair_remains_incomplete(self):
+        env_dir, python_path = self._make_env("cuda")
         popen_calls: list[list[str]] = []
 
         def popen(command, **kwargs):
@@ -158,13 +183,13 @@ class RuntimeCoreUpdateTests(unittest.TestCase):
              mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
              mock.patch.object(worker_bootstrap, "_manifest", return_value=_manifest()), \
              mock.patch.object(worker_bootstrap, "_latest_pypi_version", side_effect=lambda name: {"pymss": "2.1.4", "pymss-core": "0.1.6"}[name]), \
-             mock.patch.object(worker_bootstrap, "_probe_python_runtime", return_value=_probe_result("rocm")), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", return_value=_probe_result("cuda")), \
              mock.patch.object(worker_bootstrap, "_runtime_core_missing_records", side_effect=[{"pymss": "2.1.3"}, {"pymss": "2.1.3"}]), \
              mock.patch.object(worker_bootstrap, "_ensure_runtime_pip"), \
              mock.patch.object(worker_bootstrap.subprocess, "Popen", side_effect=popen), \
              mock.patch.object(sys, "platform", "win32"), \
              contextlib.redirect_stdout(io.StringIO()):
-            result = worker_bootstrap.cmd_update_runtime_core({"backend": "rocm", "mirror": "pypi", "pythonPath": str(python_path)})
+            result = worker_bootstrap.cmd_update_runtime_core({"backend": "cuda", "mirror": "pypi", "pythonPath": str(python_path)})
 
         self.assertNotEqual(result, 0)
         self.assertEqual(len(popen_calls), 1)

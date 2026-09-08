@@ -4,7 +4,6 @@ import type { InstalledRuntime, RuntimeBackend, RuntimeInfo } from '@/stores/app
 const RUNTIME_SIZE_HINTS: Record<RuntimeBackend, string> = {
   cpu: '~800 MB',
   cuda: '~3 GB',
-  rocm: '~5 GB',
   mlx: '~600 MB',
 }
 
@@ -15,7 +14,6 @@ export function runtimeSizeHint(backend: RuntimeBackend | string) {
 const RUNTIME_BACKEND_LABELS: Record<RuntimeBackend, string> = {
   cpu: 'CPU',
   cuda: 'NVIDIA CUDA',
-  rocm: 'AMD ROCm',
   mlx: 'Apple MLX',
 }
 
@@ -196,8 +194,7 @@ export function recommendedRuntimeBackend(info: RuntimeInfo | null | undefined):
   if (!vendors?.length) return null
   // A discrete NVIDIA card wins over an AMD integrated one when both are present.
   if (vendors.includes('nvidia')) return 'cuda'
-  // ROCm is Windows-only in the manifest; recommending it elsewhere would fail at install time.
-  if (vendors.includes('amd')) return String(info?.platform || '') === 'win32' ? 'rocm' : 'cpu'
+  // ROCm support was removed: upstream pymss never tested it. AMD-only machines run CPU.
   return 'cpu'
 }
 

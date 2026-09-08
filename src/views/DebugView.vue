@@ -557,7 +557,6 @@ const runtimeDebugEnvironments = computed<RuntimeDebugEnvironmentRow[]>(() => (a
 const runtimeBackendOptions = [
   { label: 'CPU', value: 'cpu' },
   { label: 'CUDA', value: 'cuda' },
-  { label: 'ROCm', value: 'rocm' },
   { label: 'MLX', value: 'mlx' },
 ]
 const currentRuntimeOverrideDefaults = computed(() => ({

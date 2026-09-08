@@ -287,10 +287,7 @@ def _torchaudio_requirement(runtime: RuntimeContext | None = None) -> tuple[str,
     backend = runtime.backend
     torch_spec = ((_manifest().get("backends") or {}).get(backend) or {}).get("torch") or {}
     if backend == "rocm":
-        for requirement in torch_spec.get("requirements") or []:
-            if "/torchaudio-" in str(requirement).lower():
-                return str(requirement), None
-        raise RuntimeError("The active ROCm runtime does not define a compatible torchaudio wheel")
+        raise RuntimeError("ROCm runtimes are no longer supported; reinstall the environment with cpu or cuda")
     return f"torchaudio=={version}", str(torch_spec.get("indexUrl") or "").strip() or None
 
 

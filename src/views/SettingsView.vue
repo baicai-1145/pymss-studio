@@ -216,7 +216,6 @@ const runtimeRecommendedBackend = computed(() => recommendedRuntimeBackend(app.r
 const RUNTIME_BACKEND_DESC_KEYS: Record<RuntimeBackend, string> = {
   cpu: 'onboarding.runtimeCpu',
   cuda: 'onboarding.runtimeCuda',
-  rocm: 'onboarding.runtimeRocm',
   mlx: 'onboarding.runtimeMlx',
 }
 
@@ -230,7 +229,7 @@ type BackendCardBase = { backend: RuntimeBackend; label: string; description: st
 const runtimeBackendCatalog = computed<BackendCardBase[]>(() => {
   const { isMac, isAppleSilicon } = runtimePlatform.value
   const backends: RuntimeBackend[] = ['cpu']
-  if (!isMac) backends.push('cuda', 'rocm')
+  if (!isMac) backends.push('cuda')
   if (isAppleSilicon) backends.push('mlx')
   return backends.map((backend) => ({
     backend,
@@ -279,7 +278,7 @@ const runtimeBackendCards = computed(() => {
         runtimeCoreUpdateAvailable(env, latestPymssVersion.value, latestPymssCoreVersion.value)
         || runtimeCoreSyncAvailable(env, app.runtimeInfo?.manifestVersion)
       )
-      const gpuBackend = item.backend === 'cuda' || item.backend === 'rocm' || item.backend === 'mlx'
+      const gpuBackend = item.backend === 'cuda' || item.backend === 'mlx'
       // A cancelled or failed install leaves its venv behind without an install state, so the
       // backend reads as not installed while still holding gigabytes. Surface it so the space
       // can be reclaimed instead of being stranded.

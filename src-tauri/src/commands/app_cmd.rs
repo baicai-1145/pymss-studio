@@ -794,7 +794,7 @@ pub async fn debug_runtime_override_active(app: AppHandle, payload: DebugActiveR
     require_runtime_debug_developer_mode(&app)?;
     let backend = payload.backend.trim().to_lowercase();
     let python_path = payload.python_path.trim().to_string();
-    if !matches!(backend.as_str(), "cpu" | "cuda" | "rocm" | "mlx") {
+    if !matches!(backend.as_str(), "cpu" | "cuda" | "mlx") {
         return Err(AppError::Worker("runtime debug backend is unsupported".into()));
     }
     if python_path.is_empty() {

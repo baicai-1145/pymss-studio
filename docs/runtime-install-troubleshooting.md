@@ -15,7 +15,7 @@
 | `RUNTIME_CORE_UPDATE_FAILED` | 核心更新失败 | 日志在 `<backend>/pymss-core-update.log`；重试或重装 |
 
 提示：安装日志中出现 `Insufficient disk space` 时，清理目标盘（CUDA 环境至少
-10 GiB，ROCm 至少 30 GiB）后重试。
+10 GiB）后重试。
 
 ## 常见场景
 

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("cuda", "default", "rocm", "mps", "mlx")]
+    [ValidateSet("cuda", "default", "mps", "mlx")]
     [string]$Variant = "cuda",
     [string]$Python = "python",
     [string]$RuntimeDir = "python-runtime",
@@ -66,7 +66,7 @@ function Resolve-BackendName {
     }
     # The mps/mlx build variants correspond to the manifest's mlx backend:
     # a CPU torch build plus the mlx extra.
-    $mapping = @{ cuda = "cuda"; default = "cpu"; rocm = "rocm"; mps = "mlx"; mlx = "mlx" }
+    $mapping = @{ cuda = "cuda"; default = "cpu"; mps = "mlx"; mlx = "mlx" }
     return $mapping[$Variant]
 }
 
@@ -103,24 +103,18 @@ function Install-BackendPackages {
     }
     $torch = $spec.torch
 
-    if ($torch.PSObject.Properties['rocmRequirements'] -and $torch.rocmRequirements) {
-        # ROCm wheels are version-pinned URLs from AMD; the manifest is authoritative.
-        Invoke-Pip -Python $Python -Arguments @($torch.rocmRequirements)
-        Invoke-Pip -Python $Python -Arguments (@('--no-deps') + @($torch.requirements))
+    $torchRequirement = if (-not [string]::IsNullOrWhiteSpace($TorchVersionOverride)) {
+        "torch==$TorchVersionOverride"
+    } elseif ($torch.PSObject.Properties['requirement'] -and $torch.requirement) {
+        [string]$torch.requirement
     } else {
-        $torchRequirement = if (-not [string]::IsNullOrWhiteSpace($TorchVersionOverride)) {
-            "torch==$TorchVersionOverride"
-        } elseif ($torch.PSObject.Properties['requirement'] -and $torch.requirement) {
-            [string]$torch.requirement
-        } else {
-            "torch"
-        }
-        $indexUrl = Get-TorchIndexUrl -Override $TorchIndexUrlOverride -TorchSpec $torch
-        if ($indexUrl) {
-            Invoke-Pip -Python $Python -Arguments @($torchRequirement, '--index-url', $indexUrl)
-        } else {
-            Invoke-Pip -Python $Python -Arguments @($torchRequirement)
-        }
+        "torch"
+    }
+    $indexUrl = Get-TorchIndexUrl -Override $TorchIndexUrlOverride -TorchSpec $torch
+    if ($indexUrl) {
+        Invoke-Pip -Python $Python -Arguments @($torchRequirement, '--index-url', $indexUrl)
+    } else {
+        Invoke-Pip -Python $Python -Arguments @($torchRequirement)
     }
 
     # Common dependencies come from the manifest (pymss/pymss-core excluded; they are
@@ -201,36 +195,6 @@ function Rewrite-WindowsRuntimeEnvConfigs {
         }
     }
 }
-
-function Remove-RocmOffloadArchLauncher {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$EnvironmentDir
-    )
-
-    # ROCm's pip console-script wrapper embeds the build interpreter path. The SDK can use the
-    # relocatable native tool shipped under _rocm_sdk_core when this wrapper is absent from Scripts.
-    $launcher = Join-Path $EnvironmentDir "Scripts\offload-arch.exe"
-    $sitePackages = Join-Path $EnvironmentDir "Lib\site-packages"
-    $sdkPackage = Get-ChildItem -LiteralPath $sitePackages -Directory -Filter "_rocm_sdk_core*" | Select-Object -First 1
-    if (!$sdkPackage) {
-        throw "ROCm SDK core package was not found in $sitePackages"
-    }
-    $nativeTools = Join-Path $sdkPackage.FullName "lib\llvm\bin"
-    $runtimeBin = Join-Path $sdkPackage.FullName "bin"
-    if (!(Test-Path -LiteralPath (Join-Path $nativeTools "offload-arch.exe"))) {
-        throw "ROCm native offload-arch tool was not found in $nativeTools"
-    }
-    if (!(Test-Path -LiteralPath $runtimeBin)) {
-        throw "ROCm runtime DLL directory was not found in $runtimeBin"
-    }
-    if (Test-Path -LiteralPath $launcher) {
-        Remove-Item -LiteralPath $launcher -Force
-        Write-Host "Removed relocatability-breaking ROCm launcher $launcher"
-    }
-    return @($nativeTools, $runtimeBin)
-}
-
 if ($RewriteRuntimeEnvConfigs -or $TemplateRuntimeEnvConfigs) {
     Rewrite-WindowsRuntimeEnvConfigs -EnvsDir $RuntimeEnvsDir -PythonRuntimeDir $RuntimeDir -Template:$TemplateRuntimeEnvConfigs
     exit 0
@@ -284,7 +248,6 @@ if ($InitialBackend) {
 
     # Step 3: Install packages for the backend (requirements resolved from the manifest)
     Install-BackendPackages -Python $envPython -Manifest $manifest -Backend $InitialBackend -TorchVersionOverride $TorchVersion -TorchIndexUrlOverride $TorchIndexUrl
-    $rocmToolDirs = if ($InitialBackend -eq "rocm") { Remove-RocmOffloadArchLauncher -EnvironmentDir $envDir } else { @() }
     & (Join-Path $PSScriptRoot "prune-python-runtime.ps1") -RuntimeDir $envDir -KeepScripts
     Invoke-NativeChecked -FilePath $envPython -Arguments @('-m', 'pip', '--version')
 
@@ -293,9 +256,6 @@ if ($InitialBackend) {
     $previousPath = $env:PATH
     try {
         $env:PYTHONDONTWRITEBYTECODE = "1"
-        if ($rocmToolDirs.Count -gt 0) {
-            $env:PATH = ($rocmToolDirs + $previousPath) -join ";"
-        }
         Invoke-NativeChecked -FilePath $envPython -Arguments @('-c', "import importlib.util, pymss, pymss.graph, torch, librosa, av, yaml, tqdm; print('pymss', getattr(pymss, '__version__', 'unknown'), pymss.__file__); print('torch', torch.__version__, 'cuda', torch.version.cuda, 'cuda_available', torch.cuda.is_available()); print('librosa', librosa.__version__); print('av', av.__version__); print('mlx', importlib.util.find_spec('mlx') is not None)")
 
         # Step 5: Read manifest version and write state files

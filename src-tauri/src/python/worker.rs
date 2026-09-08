@@ -206,7 +206,7 @@ fn is_bundled_runtime_python_path(file: &Path, python_path: &str) -> AppResult<b
     let content = std::fs::read_to_string(file)?;
     let record: ActiveRuntimeRecord = serde_json::from_str(&content)?;
     let backend = record.backend.unwrap_or_default().trim().to_ascii_lowercase();
-    if !matches!(backend.as_str(), "cpu" | "cuda" | "rocm" | "mlx") {
+    if !matches!(backend.as_str(), "cpu" | "cuda" | "mlx") {
         return Ok(false);
     }
     let Some(envs_dir) = file.parent() else {
@@ -245,7 +245,7 @@ fn active_path_backend_matches(file: &Path, python_path: &str) -> bool {
     let Some(backend) = record.backend.filter(|value| !value.trim().is_empty()) else {
         return false;
     };
-    if !matches!(backend.trim().to_ascii_lowercase().as_str(), "cpu" | "cuda" | "rocm" | "mlx") {
+    if !matches!(backend.trim().to_ascii_lowercase().as_str(), "cpu" | "cuda" | "mlx") {
         return false;
     }
     let path = PathBuf::from(python_path);
@@ -289,49 +289,6 @@ fn bundled_bin_dirs(app: &AppHandle) -> AppResult<Vec<PathBuf>> {
     }
 
     Ok(dirs.into_iter().filter(|dir| dir.is_dir()).collect())
-}
-
-#[cfg(windows)]
-fn rocm_native_tool_dir(runtime_envs_dir: &Path) -> Option<PathBuf> {
-    let site_packages = runtime_envs_dir.join("rocm").join("Lib").join("site-packages");
-    let entries = std::fs::read_dir(site_packages).ok()?;
-    entries
-        .flatten()
-        .map(|entry| entry.path())
-        .find_map(|package_dir| {
-            let name = package_dir.file_name()?.to_str()?;
-            let tool_dir = package_dir.join("lib").join("llvm").join("bin");
-            (name.starts_with("_rocm_sdk_core")
-                && tool_dir.join("offload-arch.exe").is_file())
-            .then_some(tool_dir)
-        })
-}
-
-#[cfg(windows)]
-fn rocm_native_tool_dirs(app: &AppHandle) -> AppResult<Vec<PathBuf>> {
-    let mut runtime_envs_dirs = vec![storage::runtime_envs_dir(app)?];
-    runtime_envs_dirs.extend(bundled_runtime_envs_dirs(app)?);
-    let mut result = Vec::new();
-    for runtime_envs in runtime_envs_dirs {
-        let Some(tool_dir) = rocm_native_tool_dir(&runtime_envs) else {
-            continue;
-        };
-        let sdk_bin = tool_dir
-            .parent()
-            .and_then(|path| path.parent())
-            .and_then(|path| path.parent())
-            .map(|path| path.join("bin"));
-        result.push(tool_dir);
-        if let Some(sdk_bin) = sdk_bin.filter(|dir| dir.is_dir()) {
-            result.push(sdk_bin);
-        }
-    }
-    Ok(result)
-}
-
-#[cfg(not(windows))]
-fn rocm_native_tool_dirs(_app: &AppHandle) -> AppResult<Vec<PathBuf>> {
-    Ok(Vec::new())
 }
 
 #[cfg(target_os = "macos")]
@@ -475,8 +432,7 @@ fn build_worker_command(
         );
     }
     apply_proxy_env(app, &mut cmd);
-    let mut tool_dirs = rocm_native_tool_dirs(app)?;
-    tool_dirs.extend(bundled_bin_dirs(app)?);
+    let tool_dirs = bundled_bin_dirs(app)?;
     if let Some(path) = prepend_path(std::env::var("PATH").ok(), tool_dirs) {
         cmd.env("PATH", path);
     }
@@ -817,12 +773,13 @@ fn emit_worker_stdout(app: &AppHandle, line: String) {
     );
 }
 
-fn is_rocm_offload_arch_diagnostic(line: &str) -> bool {
+fn is_worker_diagnostic_noise(line: &str) -> bool {
+    // Console-launcher/stderr noise that must surface as a warning instead of failing the
+    // whole worker stream. The ROCm offload-arch patterns that used to live here went away
+    // with ROCm support.
     let message = line.trim();
     message.starts_with("Fatal error in launcher: Unable to create process using")
-        || message.contains("offload-arch failed with return code")
         || message == "[stderr]"
-        || message.starts_with("[rocm_sdk] offload-arch")
 }
 
 pub fn run_worker_once(app: &AppHandle, command: &str) -> AppResult<Value> {
@@ -914,7 +871,7 @@ pub fn run_worker_with_payload(
             }
             Err(err) => {
                 log_worker_parse_error(app, command, None, &err, &line);
-                if is_rocm_offload_arch_diagnostic(&line) {
+                if is_worker_diagnostic_noise(&line) {
                     emit_worker_stdout(app, line);
                 } else {
                     worker_error = Some(AppError::Worker(format!(
@@ -1092,7 +1049,7 @@ pub fn spawn_worker_background(
                 }
                 Err(err) => {
                     log_worker_parse_error(&app, &command_name, Some(&task_id), &err, &line);
-                    if is_rocm_offload_arch_diagnostic(&line) {
+                    if is_worker_diagnostic_noise(&line) {
                         for registered_task_id in &registered_task_ids {
                             emit_task_log(&app, registered_task_id, "warning", line.clone());
                         }
@@ -1337,43 +1294,15 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[cfg(windows)]
     #[test]
-    fn finds_rocm_native_offload_arch_tool() {
-        let root = std::env::temp_dir().join(format!(
-            "pymss-worker-rocm-tool-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let tool_dir = root
-            .join("rocm")
-            .join("Lib")
-            .join("site-packages")
-            .join("_rocm_sdk_core")
-            .join("lib")
-            .join("llvm")
-            .join("bin");
-        std::fs::create_dir_all(&tool_dir).unwrap();
-        std::fs::write(tool_dir.join("offload-arch.exe"), "stub").unwrap();
-
-        assert_eq!(super::rocm_native_tool_dir(&root), Some(tool_dir));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn recognizes_only_known_rocm_offload_arch_diagnostics() {
+    fn recognizes_only_known_worker_diagnostic_noise() {
         for line in [
             "Fatal error in launcher: Unable to create process using 'D:\\a\\python.exe'",
-            "[WARNING] offload-arch failed with return code 1",
             "[stderr]",
-            "[rocm_sdk] offload-arch not found",
         ] {
-            assert!(super::is_rocm_offload_arch_diagnostic(line));
+            assert!(super::is_worker_diagnostic_noise(line));
         }
-        assert!(!super::is_rocm_offload_arch_diagnostic("unrelated Python traceback"));
+        assert!(!super::is_worker_diagnostic_noise("unrelated Python traceback"));
     }
 
 }

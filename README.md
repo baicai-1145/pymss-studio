@@ -55,7 +55,6 @@ Choose the package variant that matches your machine:
 | NVIDIA GPU | Windows CUDA |
 | No discrete GPU, integrated graphics only, or you prefer CPU inference | Windows CPU |
 | Stable network, and you want the smallest download | Windows Online |
-| Windows AMD GPU | Windows ROCm |
 | Apple Silicon Mac, including M1/M2/M3/M4 | macOS MLX |
 | Intel Mac | No dedicated release package currently |
 
