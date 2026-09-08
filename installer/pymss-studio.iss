@@ -146,14 +146,19 @@ begin
   begin
     RaiseException('Failed to write Python venv config: ' + ConfigPath);
   end;
+
+  if Backend = 'rocm' then
+  begin
+    { ROCm's pip console launcher embeds the CI Python path and is not relocatable. }
+    RemoveIfExists(EnvDir + '\Scripts\offload-arch.exe');
+  end;
 end;
 
 procedure RepairBundledRuntimeEnvs();
 begin
   RepairVenvConfig('cpu');
   RepairVenvConfig('cuda');
-  { ROCm environments from older releases are no longer supported (upstream pymss never
-    tested ROCm); the app reports them as reclaimable so users can delete the leftovers. }
+  RepairVenvConfig('rocm');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

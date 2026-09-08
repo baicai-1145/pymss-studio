@@ -1365,7 +1365,7 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
         _ensure_runtime_pip(env_python, task_id, append_log)
         torch = spec.get("torch", {})
         torch_args = list(torch.get("requirements", [])) if torch.get("requirements") else [torch["requirement"]]
-        run_pip((["--no-deps"] if torch.get("noDeps") else []) + torch_args, "torch", torch.get("indexUrl"))
+        run_pip(torch_args, "torch", torch.get("indexUrl"))
         common = [value for name, value in manifest["common"].items() if name not in {"pymss", "pymss-core"}]
         pymss_requirement = manifest["common"]["pymss"]
         pymss_core_requirement = manifest["common"]["pymss-core"]

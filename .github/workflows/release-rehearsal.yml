@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       backends:
-        description: Comma-separated backends to rehearse
+        description: Comma-separated package sets to rehearse (cpu, cuda, rocm)
         required: false
         default: cpu
   schedule:
@@ -20,16 +20,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Reusable-workflow call jobs may not reference matrix in their job-level if,
+  # so each rehearsed package set is its own explicit job. Scheduled runs exercise
+  # everything; manual runs default to cpu only.
   rehearse-windows-cpu:
     name: Rehearse Windows cpu release
-    # Reusable-workflow call jobs may not reference matrix in their job-level if,
-    # so each rehearsed backend is its own explicit job.
     if: >-
       github.event_name == 'schedule' ||
       contains(github.event.inputs.backends || '', 'cpu')
     uses: ./.github/workflows/release-windows.yml
     with:
       version: 0.0.0-rehearsal.${{ github.run_number }}
+      package_set: cpu
+    permissions:
+      contents: read
+
+  rehearse-windows-cuda:
+    name: Rehearse Windows cuda release
+    if: >-
+      github.event_name == 'schedule' ||
+      contains(github.event.inputs.backends || '', 'cuda')
+    uses: ./.github/workflows/release-windows.yml
+    with:
+      version: 0.0.0-rehearsal.${{ github.run_number }}
+      package_set: cuda
+    permissions:
+      contents: read
+
+  rehearse-windows-rocm:
+    name: Rehearse Windows rocm release
+    if: >-
+      github.event_name == 'schedule' ||
+      contains(github.event.inputs.backends || '', 'rocm')
+    uses: ./.github/workflows/release-windows.yml
+    with:
+      version: 0.0.0-rehearsal.${{ github.run_number }}
+      package_set: rocm
     permissions:
       contents: read
 

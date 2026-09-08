@@ -7,9 +7,15 @@ on:
         description: Release version
         required: true
         type: string
+      package_set:
+        description: Which package jobs to run (all, cuda, cpu, rocm)
+        required: false
+        default: all
+        type: string
 
 jobs:
   windows-cuda-prepare:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cuda'
     name: Windows x64 CUDA prepare
     runs-on: windows-latest
     outputs:
@@ -164,6 +170,7 @@ jobs:
           compression-level: 0
 
   windows-cuda-7z:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cuda'
     name: Windows x64 CUDA portable 7z
     runs-on: windows-latest
     needs: windows-cuda-prepare
@@ -193,6 +200,7 @@ jobs:
           path: release/${{ needs.windows-cuda-prepare.outputs.stage_name }}.7z
 
   windows-cuda-exe:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cuda'
     name: Windows x64 CUDA setup exe
     runs-on: windows-latest
     needs: windows-cuda-prepare
@@ -211,6 +219,7 @@ jobs:
           output-file: Pymss-Studio-${{ needs.windows-cuda-prepare.outputs.version }}-windows-x64-cuda-setup.exe
 
   windows-cpu-prepare:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 CPU prepare
     runs-on: windows-latest
     outputs:
@@ -357,6 +366,7 @@ jobs:
           compression-level: 0
 
   windows-cpu-7z:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 CPU portable 7z
     runs-on: windows-latest
     needs: windows-cpu-prepare
@@ -385,6 +395,7 @@ jobs:
           path: release/${{ needs.windows-cpu-prepare.outputs.stage_name }}.7z
 
   windows-cpu-exe:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 CPU setup exe
     runs-on: windows-latest
     needs: windows-cpu-prepare
@@ -405,6 +416,7 @@ jobs:
 
 
   windows-online-prepare:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 online runtime prepare
     runs-on: windows-latest
     outputs:
@@ -511,6 +523,7 @@ jobs:
           path: release/${{ steps.meta.outputs.stage_name }}
           compression-level: 0
   windows-online-7z:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 online portable 7z
     runs-on: windows-latest
     needs: windows-online-prepare
@@ -547,6 +560,7 @@ jobs:
           path: release/Pymss-Studio-${{ needs.windows-online-prepare.outputs.version }}-windows-x64-update.zip
 
   windows-online-exe:
+    if: inputs.package_set == 'all' || inputs.package_set == 'cpu'
     name: Windows x64 online setup exe
     runs-on: windows-latest
     needs: windows-online-prepare
@@ -566,6 +580,7 @@ jobs:
           output-file: Pymss-Studio-${{ needs.windows-online-prepare.outputs.version }}-windows-x64-online-setup.exe
 
   windows-rocm-prepare:
+    if: inputs.package_set == 'all' || inputs.package_set == 'rocm'
     name: Windows x64 ROCm prepare
     runs-on: windows-latest
     outputs:
@@ -690,6 +705,7 @@ jobs:
           compression-level: 0
 
   windows-rocm-7z:
+    if: inputs.package_set == 'all' || inputs.package_set == 'rocm'
     name: Windows x64 ROCm portable 7z
     runs-on: windows-latest
     needs: windows-rocm-prepare
@@ -713,6 +729,7 @@ jobs:
           path: release/${{ needs.windows-rocm-prepare.outputs.stage_name }}.7z
 
   windows-rocm-exe:
+    if: inputs.package_set == 'all' || inputs.package_set == 'rocm'
     name: Windows x64 ROCm setup exe
     runs-on: windows-latest
     needs: windows-rocm-prepare

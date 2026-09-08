@@ -50,4 +50,6 @@ spike 验收清单：离线分发（uv 二进制必须内置）、
 
 ### 后记（2026-09）：ROCm 后端先移除、后随上游 v2.1.5 重新引入
 
-上游 pymss 一度未测试 ROCm（无 CI 矩阵、无基准、README 不声明），下游自建 ROCm backend 属于无背书的功能扩散，故先行移除。pymss v2.1.5 正式加入 ROCm 支持：`device="rocm"` 设备别名映射到 cuda 路径、官方 Windows 安装配方（repo.radeon.com 的 3 个 SDK wheel + torch 2.9.1+rocm7.2.1）、AOTriton SDPA 注意力路径。本分支据此重新引入 ROCm backend，配置完全对齐上游官方配方，并修正旧配置的缺陷：不再对 SDK/torch wheel 使用 `--no-deps`（旧配置会导致 torch 的 sympy/jinja2/networkx 等依赖缺失，torch 导入即失败）。当前 ROCm 仅支持通过应用内在线安装（Windows；Linux 依赖系统级 ROCm 驱动，超出 pip 可安装范围）。
+上游 pymss 一度未测试 ROCm（无 CI 矩阵、无基准、README 不声明），下游自建 ROCm backend 属于无背书的功能扩散，故先行移除。pymss v2.1.5 正式加入 ROCm 支持：`device="rocm"` 设备别名映射到 cuda 路径、官方 Windows 安装配方（repo.radeon.com 的 3 个 SDK wheel + torch 2.9.1+rocm7.2.1）、AOTriton SDPA 注意力路径，本分支据此重新引入 ROCm backend。
+
+配置对齐上游官方配方，并修正旧配置的缺陷：SDK/torch wheel 不再使用 `--no-deps` 安装（旧配置导致 torch 的 sympy/jinja2/networkx 等依赖缺失，torch 导入即失败），改为依赖解析常开。ROCm 的离线打包（windows-rocm 系列 job，安装期做 offload-arch launcher 修正）与应用内在线安装并存：离线包服务无法在安装期联网的场景，在线安装则始终就地安装、launcher 天然可用。ROCm 仅支持 Windows；Linux 依赖系统级 ROCm 驱动，超出 pip 可安装范围。
