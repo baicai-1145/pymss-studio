@@ -1,0 +1,49 @@
+name: CI Lite
+
+# Lightweight gate for every push on every branch. The full CI (ci.yml) runs on
+# pull requests and main; this one keeps feature-branch pushes from breaking the
+# fast, cheap checks (workflow/script syntax, manifest pins, runtime-install
+# logic tests) without paying for the Windows/macOS test matrix on every push.
+on:
+  push:
+    branches-ignore:
+      - main
+
+concurrency:
+  group: ci-lite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick-checks:
+    name: Fast checks (push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate GitHub Workflows
+        run: |
+          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+
+      - name: Shellcheck build scripts
+        shell: bash
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          git ls-files 'scripts/*.sh' '.github/**/*.sh' | while read -r script; do
+            shellcheck "$script"
+          done
+
+      - name: Runtime manifest sanity check
+        run: python3 scripts/check_runtime_manifest.py
+
+      - name: Runtime logic tests (no accelerator deps)
+        # These three suites cover the install/update/runtime-report logic without
+        # importing pymss itself; suites that need the real package run in the full CI.
+        run: |
+          python3 -m unittest discover -s tests/python -t tests -p "test_worker_bootstrap.py"
+          python3 -m unittest discover -s tests/python -t tests -p "test_runtime_core_update.py"
+          python3 -m unittest discover -s tests/python -t tests -p "test_cli_shim.py"
