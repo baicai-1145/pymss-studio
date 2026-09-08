@@ -180,9 +180,9 @@ class MultipleEnvironmentTests(unittest.TestCase):
             self.assertEqual(worker_bootstrap.cmd_activate_runtime({"backend": "cpu"}), 0)
             after_cpu = self._active()
         self.assertEqual(after_cuda["backend"], "cuda")
-        self.assertTrue(after_cuda["pythonPath"].endswith("cuda\\Scripts\\python.exe"))
+        self.assertTrue(after_cuda["pythonPath"].replace("\\", "/").endswith("cuda/Scripts/python.exe"))
         self.assertEqual(after_cpu["backend"], "cpu")
-        self.assertTrue(after_cpu["pythonPath"].endswith("cpu\\Scripts\\python.exe"))
+        self.assertTrue(after_cpu["pythonPath"].replace("\\", "/").endswith("cpu/Scripts/python.exe"))
         # Switching back and forth must not damage either environment.
         with self._runtime():
             self.assertEqual(len(worker_bootstrap._installed_envs(MANIFEST)), 2)
@@ -582,7 +582,7 @@ class EnvironmentStateTrustTests(unittest.TestCase):
         self.assertEqual(state["torchBackend"], "cpu")
         self.assertIs(state["acceleratorAvailable"], False)
         # Probed the environment's own interpreter, not the active runtime's.
-        self.assertTrue(str(probe.call_args.args[0]).endswith("cpu\\Scripts\\python.exe"))
+        self.assertTrue(str(probe.call_args.args[0]).replace("\\", "/").endswith("cpu/Scripts/python.exe"))
         # Corrected on disk, so the cost is paid once.
         self.assertEqual(self._stored("cpu")["torchBackend"], "cpu")
 
@@ -916,6 +916,88 @@ class InstallRecordsTheNewEnvironmentTests(unittest.TestCase):
              mock.patch.object(sys, "platform", "win32"), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
+    def test_reinstall_over_a_different_torch_build_purges_the_wheel_cache(self):
+        """The shared cache keeps every torch wheel ever downloaded; a successful install that
+        replaced the torch build must purge the dead one, and a same-version reinstall must not."""
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        run_calls: list[list[str]] = []
+
+        def run(command, **kwargs):
+            del kwargs
+            run_calls.append(command)
+            return mock.Mock(returncode=0)
+
+        pip = mock.Mock(return_value=mock.Mock(stdout=iter(()), wait=mock.Mock(return_value=0), returncode=0, poll=mock.Mock(return_value=0)))
+
+        # Pre-existing environment whose state records the OLD torch build.
+        env_dir = self.envs_dir / "cpu"
+        (env_dir / "Scripts").mkdir(parents=True, exist_ok=True)
+        (env_dir / "Scripts" / "python.exe").write_text("stub", encoding="utf-8")
+        (env_dir / "pymss-runtime-state.json").write_text(json.dumps({
+            "backend": "cpu", "manifestVersion": "test-1", "stateVersion": 2,
+            "torchVersion": "2.7.0+cpu", "torchBackend": "cpu", "acceleratorAvailable": False,
+            "packages": {name: True for name in COMMON_PACKAGES},
+        }), encoding="utf-8")
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", return_value={**probe_result("cpu"), "torchVersion": "2.7.1+cpu"}), \
+             mock.patch.object(worker_bootstrap, "_probe_python_package_versions", return_value={"torch": "2.7.1+cpu"}), \
+             mock.patch.object(worker_bootstrap, "_runtime_python_works", return_value=True), \
+             mock.patch.object(worker_bootstrap, "_runtime_pip_works", return_value=True), \
+             mock.patch.object(worker_bootstrap.subprocess, "run", side_effect=run), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen", pip), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
+        purge_calls = [call for call in run_calls if call[1:4] == ["-m", "pip", "cache"]]
+        self.assertEqual(len(purge_calls), 1, "exactly one cache purge after a torch change")
+        self.assertTrue(purge_calls[0][0].replace("\\", "/").endswith("/python.exe"))
+
+    def test_same_version_reinstall_keeps_the_wheel_cache(self):
+        manifest = {
+            **MANIFEST,
+            "common": {**MANIFEST["common"], "pymss-core": "pymss-core==0.1.6"},
+            "backends": {"cpu": {"platforms": ["win32"], "torch": {"requirement": "torch==2.7.1"}}},
+        }
+        run_calls: list[list[str]] = []
+
+        def run(command, **kwargs):
+            del kwargs
+            run_calls.append(command)
+            return mock.Mock(returncode=0)
+
+        pip = mock.Mock(return_value=mock.Mock(stdout=iter(()), wait=mock.Mock(return_value=0), returncode=0, poll=mock.Mock(return_value=0)))
+        env_dir = self.envs_dir / "cpu"
+        (env_dir / "Scripts").mkdir(parents=True, exist_ok=True)
+        (env_dir / "Scripts" / "python.exe").write_text("stub", encoding="utf-8")
+        (env_dir / "pymss-runtime-state.json").write_text(json.dumps({
+            "backend": "cpu", "manifestVersion": "test-1", "stateVersion": 2,
+            "torchVersion": "2.7.1+cpu", "torchBackend": "cpu", "acceleratorAvailable": False,
+            "packages": {name: True for name in COMMON_PACKAGES},
+        }), encoding="utf-8")
+
+        with mock.patch.object(worker_bootstrap, "RUNTIME_ENVS_DIR", self.envs_dir), \
+             mock.patch.object(worker_bootstrap, "ACTIVE_RUNTIME_FILE", self.active_file), \
+             mock.patch.object(worker_bootstrap, "_manifest", return_value=manifest), \
+             mock.patch.object(worker_bootstrap, "_probe_python_runtime", return_value={**probe_result("cpu"), "torchVersion": "2.7.1+cpu"}), \
+             mock.patch.object(worker_bootstrap, "_probe_python_package_versions", return_value={"torch": "2.7.1+cpu"}), \
+             mock.patch.object(worker_bootstrap, "_runtime_python_works", return_value=True), \
+             mock.patch.object(worker_bootstrap, "_runtime_pip_works", return_value=True), \
+             mock.patch.object(worker_bootstrap.subprocess, "run", side_effect=run), \
+             mock.patch.object(worker_bootstrap.subprocess, "Popen", pip), \
+             mock.patch.object(sys, "platform", "win32"), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(worker_bootstrap.cmd_install_runtime({"backend": "cpu", "mirror": "pypi"}), 0)
+
+        self.assertFalse(any("cache" in call for call in run_calls))
 
 
 class PyPiMirrorSelectionTests(unittest.TestCase):

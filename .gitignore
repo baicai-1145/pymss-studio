@@ -46,6 +46,7 @@ Thumbs.db
 data/
 results/
 outputs/
+.tmp/
 *.tmp
 
 # Environment

@@ -1249,12 +1249,30 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
     env_python = _env_python_path(backend)
     install_log_path = _env_log_path(backend)
     reinstall_backup: Path | None = None
+    previous_torch: str | None = None
     if env_dir.is_dir() and env_python.is_file() and _env_state_path(backend).is_file():
         import shutil
         reinstall_backup = RUNTIME_ENVS_DIR / f".{backend}.reinstalling"
         if reinstall_backup.exists():
             shutil.rmtree(reinstall_backup)
+        # Read from the state file before the directory is renamed away: probing the
+        # interpreter through the backup path is fragile, and the state records the torch
+        # build the previous install verified.
+        try:
+            previous_torch = str(json.loads(_env_state_path(backend).read_text(encoding="utf-8")).get("torchVersion") or "") or None
+        except (OSError, ValueError):
+            previous_torch = None
         env_dir.rename(reinstall_backup)
+        # The rename removed the directory the install log lives in; recreate it so the
+        # fresh install (log write, venv creation) has a place to land. On main this
+        # rename left the target gone and every reinstall failed writing the first log
+        # line — an uncovered path my cache-purge test exposed.
+        env_dir.mkdir(parents=True, exist_ok=True)
+    # The shared pip cache keeps every torch wheel it has ever downloaded. When this install
+    # replaces a different torch build, the previous one becomes dead weight (multi-GB for
+    # CUDA), so purge the cache on success. Same-version reinstalls — the cancel-and-retry
+    # case the cache exists for — never trigger a purge, and a failed install does not either.
+
     def append_log(stage: str, message: str) -> None:
         with install_log_path.open("a", encoding="utf-8", errors="replace") as file:
             file.write(f"[{stage}] {message}\n")
@@ -1394,6 +1412,24 @@ def cmd_install_runtime(payload: dict[str, Any]) -> int:
             "pymssGraphAvailable": bool(probed.get("pymssGraphAvailable")),
         }
         _atomic_write_json(_env_state_path(backend), state)
+        new_torch = probed.get("torchVersion")
+        if previous_torch and new_torch and previous_torch != new_torch:
+            try:
+                subprocess.run(
+                    [str(env_python), "-m", "pip", "cache", "purge"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=120,
+                )
+                message = f"torch changed {previous_torch} -> {new_torch}; pip cache purged to bound disk usage"
+                append_log("cache", message)
+                _emit("runtime_install_log", {"stage": "cache", "message": message}, task_id)
+            except (OSError, subprocess.SubprocessError) as cache_error:
+                # Cache hygiene is best-effort; an oversized cache is a disk-space nuisance,
+                # not an install failure.
+                append_log("cache", f"pip cache purge failed: {cache_error}")
         active = {
             **state,
             "pythonPath": str(env_python),

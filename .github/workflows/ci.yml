@@ -68,6 +68,23 @@ jobs:
           assert manifest.get("python"), "python version missing"
           for name, requirement in manifest["common"].items():
               assert isinstance(requirement, str) and requirement.strip(), f"common.{name} has an empty requirement"
+
+          # requirements-ci.txt pins the subset of manifest packages the test environment
+          # needs; its bounds must match the manifest exactly or the two drift apart.
+          ci_requirements = {}
+          for line in Path("python/requirements-ci.txt").read_text(encoding="utf-8").splitlines():
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              name = line.split("[")[0].split(">")[0].split("=")[0].split("<")[0].strip()
+              ci_requirements[name] = line
+          for name, requirement in ci_requirements.items():
+              expected = manifest["common"].get(name)
+              assert expected == requirement, (
+                  f"requirements-ci.txt '{requirement}' does not match manifest "
+                  f"common.{name}='{expected}'"
+              )
+
           for name, spec in manifest["backends"].items():
               assert spec.get("platforms"), f"backend {name} lacks platforms"
               torch = spec.get("torch") or {}
@@ -127,8 +144,14 @@ jobs:
         run: python -m unittest discover -s tests/python -t tests -p "test_*.py"
 
   rust-tests:
-    name: Rust tests
-    runs-on: windows-latest
+    name: Rust tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the release platform; macOS guards the path logic in python/worker.rs
+        # that is compiled everywhere but only exercised on the release platform otherwise.
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -138,6 +161,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.os }}
 
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml

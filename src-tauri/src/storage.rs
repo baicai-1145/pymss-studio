@@ -5,6 +5,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+// Used inside the Windows-only ReplaceFileW retry loop; a plain import warns as
+// unused on every non-Windows build.
+#[cfg(windows)]
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
