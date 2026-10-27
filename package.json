@@ -14,7 +14,9 @@
     "test:all": "pnpm test:frontend && pnpm test:python && pnpm test:rust",
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",
-    "tauri:preview": "node scripts/tauri.mjs dev --config src-tauri/tauri.preview.conf.json"
+    "tauri:preview": "node scripts/tauri.mjs dev --config src-tauri/tauri.preview.conf.json",
+    "web": "node scripts/web-server.mjs",
+    "web:dev": "node scripts/web-server.mjs --port 8710"
   },
   "dependencies": {
     "@comfyorg/litegraph": "0.17.2",

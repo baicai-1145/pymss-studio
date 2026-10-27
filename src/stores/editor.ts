@@ -12,6 +12,7 @@ import {
 } from '@/utils/editorClips'
 import { registerWindowCloseGuard } from '@/utils/windowCloseGuards'
 import { isTauriRuntime } from '@/utils/appStore'
+import { isWebRuntime } from '@/utils/webRuntime'
 import type { SeparationTask, StemOutput } from '@/stores/task'
 import type {
   EditorExportFormat,
@@ -880,7 +881,9 @@ export const useEditorStore = defineStore('editor', () => {
   }
 
   async function openProjectWindow(projectId: string) {
-    return invoke('open_editor_window', { payload: { projectId } })
+    const result = await invoke<{ url?: string }>('open_editor_window', { payload: { projectId } })
+    if (result?.url && isWebRuntime()) window.open(`#${result.url.replace(/^#/, '')}`, '_blank')
+    return result
   }
 
   async function projectExists(projectId: string) {
