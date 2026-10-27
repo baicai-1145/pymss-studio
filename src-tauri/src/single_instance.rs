@@ -32,8 +32,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SW_RESTORE,
 };
 
-#[cfg(windows)]
-const INSTANCE_MUTEX_NAME: &str = "Local\\PymssStudioMainInstance";
+#[cfg(all(windows, not(feature = "vst-lab")))]
+const INSTANCE_MUTEX_NAME: &str = r"Local\PymssStudioMainInstance";
+#[cfg(all(windows, feature = "vst-lab"))]
+const INSTANCE_MUTEX_NAME: &str = r"Local\PymssStudioVstLabInstance";
 
 #[cfg(windows)]
 pub(crate) struct InstanceMutex(HANDLE);
@@ -97,7 +99,8 @@ pub fn acquire_or_focus() -> Result<Option<InstanceMutex>, String> {
 #[cfg(unix)]
 fn instance_lock_path() -> PathBuf {
     let user_id = unsafe { libc::geteuid() };
-    Path::new("/tmp").join(format!("pymss-studio-main-{user_id}.lock"))
+    let instance = if cfg!(feature = "vst-lab") { "vstlab" } else { "main" };
+    Path::new("/tmp").join(format!("pymss-studio-{instance}-{user_id}.lock"))
 }
 
 #[cfg(unix)]

@@ -168,11 +168,6 @@ export function createDemoRuntime(config: DemoConfig) {
       }
       return pcm.buffer
     }
-    if (command === 'append_editor_export_render_chunk') return {
-      path: prefix + '/Temp/editor-export/clip_' + args.clipIndex + '.wav',
-      duration: args.frames / args.sampleRate, sampleRate: args.sampleRate, channels: args.channels,
-    }
-    if (command === 'cleanup_editor_export_render') return
     if (command === 'start_editor_mix_export') {
       later(() => worker('editor_mix_exported', payload.taskId, { path: output + '/mix.wav', duration: 12, sampleRate: rate, channels: 2, format: payload.format }), 300)
       return { taskId: payload.taskId, started: true }

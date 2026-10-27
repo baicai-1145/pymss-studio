@@ -1,6 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod commands;
+#[cfg(any(target_os = "macos", test))]
+mod app_quit;
 mod automatic_report;
 mod diagnostic_context;
 mod diagnostic_report;
@@ -32,13 +34,23 @@ use tauri::{Emitter, Manager};
 
 
 fn main() {
+    if let Some(code) = commands::plugin_host::run_capabilities_cli() {
+        std::process::exit(code);
+    }
+    #[cfg(feature = "native-plugins")]
+    if let Some(code) = pymss_audio_host::run_cli() {
+        std::process::exit(code);
+    }
+    commands::plugin_host::configure_lab_environment();
     terminal::attach_parent();
     if session_log::configure_startup_logging(std::env::args_os().skip(1)) {
         session_log::early("DEBUG", "app.debug", "Verbose logging enabled by --debug");
     }
+    #[cfg(not(feature = "vst-lab"))]
     if let Some(code) = update_manager::run_helper_from_args() {
         std::process::exit(code);
     }
+    #[cfg(not(feature = "vst-lab"))]
     if let Some(code) = update_manager::recover_interrupted_update_from_startup() {
         std::process::exit(code);
     }
@@ -87,11 +99,17 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .manage(commands::plugin_host::PluginHostState::default())
         .manage(AppState::new())
         .manage(workflow_editors::WorkflowEditors::default());
 
-    #[cfg(desktop)]
+    #[cfg(all(desktop, not(feature = "vst-lab")))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .menu(app_quit::menu)
+        .on_menu_event(app_quit::on_menu_event);
 
     builder
         .setup(|app| {
@@ -100,6 +118,19 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::plugin_host::plugin_host_capabilities,
+            commands::plugin_host::plugin_host_scan,
+            commands::plugin_host::plugin_host_scan_report,
+            commands::plugin_host::plugin_host_cached_scan_report,
+            commands::plugin_host::plugin_host_scan_status,
+            commands::plugin_host::plugin_host_skip_scan,
+            commands::plugin_host::plugin_host_cancel_scan,
+            commands::plugin_host::plugin_host_scan_blacklist,
+            commands::plugin_host::plugin_host_remove_scan_blacklist,
+            commands::plugin_host::plugin_host_request,
+            commands::plugin_host::plugin_host_render,
+            commands::plugin_host::plugin_host_cancel_render,
+            commands::plugin_host::plugin_host_cleanup_render,
             commands::app_cmd::cancel_task,
             commands::app_cmd::write_frontend_log,
             commands::app_cmd::close_current_window,
@@ -121,8 +152,6 @@ fn main() {
             commands::app_cmd::editor_project_exists,
             commands::app_cmd::export_editor_mix,
             commands::app_cmd::start_editor_mix_export,
-            commands::app_cmd::append_editor_export_render_chunk,
-            commands::app_cmd::cleanup_editor_export_render,
             commands::app_cmd::cancel_editor_mix_export,
             commands::app_cmd::start_audio_tool,
             commands::tempo_key::start_tempo_key_analysis,
@@ -226,6 +255,7 @@ fn main() {
         .expect("error while building Pymss Studio")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<commands::plugin_host::PluginHostState>().shutdown();
                 session_log::finish_automatic_reports(app);
             }
         });

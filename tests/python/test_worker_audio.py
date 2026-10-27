@@ -18,7 +18,7 @@ if __package__:
 else:
     import _bootstrap as _worker_test_bootstrap
 
-from worker_audio import _DiskMixBuffer, _apply_track_effects, _read_audio, _resample_audio, cmd_export_editor_mix
+from worker_audio import _DiskMixBuffer, _read_audio, _resample_audio, cmd_export_editor_mix
 
 
 class EditorEffectTests(unittest.TestCase):
@@ -99,7 +99,6 @@ class EditorEffectTests(unittest.TestCase):
                     "pan": 0,
                     "muted": False,
                     "solo": False,
-                    "effects": {"reverb": 0, "delay": 1, "delayTime": 0.1},
                     "clips": [{
                         "assetId": "source",
                         "start": 0,
@@ -115,11 +114,6 @@ class EditorEffectTests(unittest.TestCase):
             "exportDir": str(root / "output"),
             "format": "wav",
         }
-
-    def test_disabled_effects_leave_audio_unchanged(self) -> None:
-        audio = np.array([[0.1, -0.2, 0.3]], dtype=np.float32)
-        rendered = _apply_track_effects(audio, {}, 1000)
-        np.testing.assert_array_equal(rendered, audio)
 
     def test_disk_mix_buffer_grows_without_losing_mono_or_stereo_content(self) -> None:
         with tempfile.TemporaryDirectory() as temp_value:
@@ -137,32 +131,25 @@ class EditorEffectTests(unittest.TestCase):
             self.assertFalse(original_path.exists())
             self.assertFalse(grown_path.exists())
 
-    def test_echo_preserves_channels_and_adds_a_tail(self) -> None:
-        audio = np.zeros((2, 10), dtype=np.float32)
-        audio[:, 0] = 1.0
-        rendered = _apply_track_effects(audio, {"delay": 1, "delayTime": 0.1}, 1000)
-        self.assertEqual(rendered.shape, (2, 510))
-        self.assertGreater(float(np.abs(rendered[:, 100:]).max()), 0.0)
-
-    def test_compressor_reduces_large_peaks(self) -> None:
-        audio = np.ones((1, 32), dtype=np.float32)
-        rendered = _apply_track_effects(audio, {"compressor": 1}, 1000)
-        self.assertLess(float(np.max(np.abs(rendered))), 1.0)
-
-    def test_editor_export_passes_track_effects_to_the_rendered_mix(self) -> None:
+    def test_editor_export_ignores_legacy_track_effects(self) -> None:
         with tempfile.TemporaryDirectory() as temp_value:
             root = Path(temp_value)
             source = root / "source.wav"
             samples = np.zeros(200, dtype=np.float32)
-            samples[0] = 1.0
-            sf.write(source, samples, 1000)
+            samples[0] = 0.5
+            sf.write(source, samples, 1000, subtype="FLOAT")
             payload = self._export_payload(root, source)
+            payload["project"]["tracks"][0]["effects"] = {
+                "reverb": 1, "delay": 1, "delayTime": 0.1, "clarity": 1, "compressor": 1,
+            }
             with mock.patch("worker_audio.emit"):
                 self.assertEqual(cmd_export_editor_mix(payload), 0)
             rendered, sample_rate = sf.read(str(root / "output" / "effects_mix.wav"))
 
         self.assertEqual(sample_rate, 1000)
-        self.assertGreater(len(rendered), len(samples))
+        self.assertEqual(len(rendered), len(samples))
+        self.assertGreater(float(rendered[0]), 0.0)
+        self.assertEqual(float(np.abs(rendered[1:]).max()), 0.0)
 
     def test_repeated_editor_exports_preserve_the_previous_mix(self) -> None:
         with tempfile.TemporaryDirectory() as temp_value:
@@ -229,7 +216,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(second, np.ones(4800, dtype=np.float32) * 0.1, 96000)
             payload = self._export_payload(root, first, name="rates")
             payload["project"]["assets"][0].update(duration=0.05, sampleRate=32000)
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.05
             payload["project"]["assets"].append({
                 "id": "second",
@@ -246,7 +232,6 @@ class EditorEffectTests(unittest.TestCase):
                 "pan": 0,
                 "muted": False,
                 "solo": False,
-                "effects": {},
                 "clips": [{
                     "assetId": "second",
                     "start": 0,
@@ -281,7 +266,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, samples, 48000, subtype='FLOAT')
             payload = self._export_payload(root, source, name='native')
             payload['project']['assets'][0].update(sampleRate=48000, channels=2)
-            payload['project']['tracks'][0]['effects'] = {}
             payload['audioParams'] = {'wavBitDepth': 'FLOAT', 'peakProtection': False}
             with mock.patch('worker_audio.emit'):
                 self.assertEqual(cmd_export_editor_mix(payload), 0)
@@ -299,7 +283,6 @@ class EditorEffectTests(unittest.TestCase):
             source = root / "source.wav"
             sf.write(source, np.ones(100, dtype=np.float32) * 0.8, 1000, subtype="FLOAT")
             payload = self._export_payload(root, source, name="peak")
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["volume"] = 2
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             payload["audioParams"] = {"wavBitDepth": "FLOAT", "peakProtection": True}
@@ -353,7 +336,6 @@ class EditorEffectTests(unittest.TestCase):
             project = payload['project']
             project['masterVolume'], project['masterPan'] = 1.25, -.2
             project['assets'][0]['channels'] = 2
-            project['tracks'][0]['effects'] = {}
             project['assets'].append({'id': 'bg', 'path': str(background), 'duration': .2, 'sampleRate': 1000, 'channels': 1})
             project['assets'].append({'id': 'original', 'path': str(root / 'missing-original.wav'), 'duration': .2, 'sampleRate': 1000, 'channels': 1})
             project['tracks'].append({'id': 'bg', 'sourceId': 'bg', 'volume': 1, 'pan': 0, 'muted': False, 'solo': False})
@@ -468,7 +450,6 @@ class EditorEffectTests(unittest.TestCase):
             source = root / "source.wav"
             sf.write(source, np.ones(100, dtype=np.float32), 1000, subtype="FLOAT")
             payload = self._export_payload(root, source, name="fade")
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0].update(duration=0.1, fadeIn=0.1)
             with mock.patch("worker_audio.emit"):
                 self.assertEqual(cmd_export_editor_mix(payload), 0)
@@ -483,7 +464,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000, subtype="FLOAT")
             payload = self._export_payload(root, source, name="timeline")
             track = payload["project"]["tracks"][0]
-            track["effects"] = {}
             track["clips"] = [
                 {
                     "id": "first",
@@ -520,7 +500,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000)
             payload = self._export_payload(root, source, name="master-pan")
             payload["project"]["masterPan"] = 0.5
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             events: list[dict] = []
             with mock.patch("worker_audio.emit", side_effect=lambda kind, value, **_kwargs: events.append(value) if kind == "editor_mix_exported" else None):
@@ -537,7 +516,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000)
             payload = self._export_payload(root, source)
             payload["fileName"] = "CON.wav"
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             with mock.patch("worker_audio.emit"):
                 self.assertEqual(cmd_export_editor_mix(payload), 0)
@@ -551,7 +529,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000)
             payload = self._export_payload(root, source, name="progress")
             payload["taskId"] = "editor-export-task"
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             events: list[tuple[str, dict, str | None]] = []
             with mock.patch(
@@ -572,7 +549,6 @@ class EditorEffectTests(unittest.TestCase):
             source = root / "source.wav"
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000)
             payload = self._export_payload(root, source, name="write-failure")
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             with mock.patch("worker_audio.emit"), \
                  mock.patch("soundfile.SoundFile.write", side_effect=RuntimeError("write failed")), \
@@ -590,7 +566,6 @@ class EditorEffectTests(unittest.TestCase):
             sf.write(source, np.ones(100, dtype=np.float32) * 0.1, 1000)
             payload = self._export_payload(root, source, name="cancelled")
             payload["taskId"] = "cancel-write"
-            payload["project"]["tracks"][0]["effects"] = {}
             payload["project"]["tracks"][0]["clips"][0]["duration"] = 0.1
             output_dir = root / "output"
             cancel_path = output_dir / ".pymss-export-cancel-write.cancel"

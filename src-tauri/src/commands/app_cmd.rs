@@ -107,7 +107,8 @@ pub fn get_build_info() -> BuildInfo {
         build_time: option_env!("PYMSS_BUILD_TIME").unwrap_or(""),
         target: option_env!("PYMSS_BUILD_TARGET").unwrap_or("dev"),
         variant: option_env!("PYMSS_BUILD_VARIANT").unwrap_or("development"),
-        update_supported: option_env!("PYMSS_BUILD_UPDATE_SUPPORTED") == Some("true")
+        update_supported: !cfg!(feature = "vst-lab")
+            && option_env!("PYMSS_BUILD_UPDATE_SUPPORTED") == Some("true")
             && option_env!("PYMSS_BUILD_OFFICIAL") == Some("true")
             && update_manager::update_supported(),
         official: option_env!("PYMSS_BUILD_OFFICIAL") == Some("true"),
@@ -121,6 +122,9 @@ pub async fn check_managed_update(
     endpoint_override: Option<String>,
     source: Option<update_manager::UpdateSource>,
 ) -> AppResult<Option<update_manager::ManagedUpdateInfo>> {
+    if cfg!(feature = "vst-lab") {
+        return Err(AppError::Worker("Updates are disabled in VST Lab".into()));
+    }
     update_manager::check(&app, channel, endpoint_override, source.unwrap_or_default()).await
 }
 
@@ -132,6 +136,9 @@ pub async fn start_managed_update(
     expected_version: String,
     source: Option<update_manager::UpdateSource>,
 ) -> AppResult<()> {
+    if cfg!(feature = "vst-lab") {
+        return Err(AppError::Worker("Updates are disabled in VST Lab".into()));
+    }
     update_manager::start(&app, channel, endpoint_override, expected_version, source.unwrap_or_default()).await
 }
 
@@ -142,6 +149,9 @@ pub fn get_managed_update_state() -> Value {
 
 #[tauri::command]
 pub fn confirm_managed_update_startup(window: tauri::WebviewWindow) -> AppResult<()> {
+    if cfg!(feature = "vst-lab") {
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     if window.label() == "main" {
         crate::macos_update::confirm_startup(window.app_handle())?;
@@ -1395,7 +1405,7 @@ fn write_editor_project(app: &AppHandle, project: &Value) -> AppResult<Value> {
         .and_then(Value::as_str)
         .ok_or_else(|| AppError::Worker("missing editor project id".into()))?;
     let dir = editor_project_dir(app, project_id)?;
-    storage::write_json_file(&dir.join("project.json"), project)?;
+    storage::write_editor_project_file(&dir.join("project.json"), project)?;
     session_log::record_editor_project(project);
     Ok(project.clone())
 }
@@ -2296,142 +2306,6 @@ fn prepare_editor_export_payload(app: &AppHandle, mut payload: Value) -> AppResu
 pub async fn export_editor_mix(app: AppHandle, payload: Value) -> AppResult<Value> {
     let payload = prepare_editor_export_payload(&app, payload)?;
     run_worker_with_payload(&app, "export_editor_mix", Some(payload))
-}
-
-fn editor_export_render_dir(app: &AppHandle, project_id: &str, task_id: &str) -> AppResult<PathBuf> {
-    if !task_id.starts_with("editor_export_") || task_id.len() > 96
-        || !task_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
-        return Err(AppError::Worker("invalid editor export task id".into()));
-    }
-    Ok(editor_project_dir(app, project_id)?.join(".export-render").join(task_id))
-}
-
-fn float_wav_header(frames: u32, sample_rate: u32, channels: u16) -> AppResult<[u8; 44]> {
-    if frames == 0 || !(8_000..=192_000).contains(&sample_rate) || !(1..=2).contains(&channels) {
-        return Err(AppError::Worker("invalid rendered audio parameters".into()));
-    }
-    let size = frames.checked_mul(u32::from(channels) * 4)
-        .filter(|size| *size <= u32::MAX - 36)
-        .ok_or_else(|| AppError::Worker("rendered audio is too large".into()))?;
-    let mut header = [0u8; 44];
-    header[..4].copy_from_slice(b"RIFF");
-    header[4..8].copy_from_slice(&(size + 36).to_le_bytes());
-    header[8..16].copy_from_slice(b"WAVEfmt ");
-    header[16..20].copy_from_slice(&16u32.to_le_bytes());
-    header[20..22].copy_from_slice(&3u16.to_le_bytes());
-    header[22..24].copy_from_slice(&channels.to_le_bytes());
-    header[24..28].copy_from_slice(&sample_rate.to_le_bytes());
-    header[28..32].copy_from_slice(&(sample_rate * u32::from(channels) * 4).to_le_bytes());
-    header[32..34].copy_from_slice(&(channels * 4).to_le_bytes());
-    header[34..36].copy_from_slice(&32u16.to_le_bytes());
-    header[36..40].copy_from_slice(b"data");
-    header[40..44].copy_from_slice(&size.to_le_bytes());
-    Ok(header)
-}
-
-fn append_rendered_audio(path: &Path, header: &[u8; 44], offset: u64, bytes: &[u8]) -> AppResult<bool> {
-    let size = u64::from(u32::from_le_bytes(header[40..44].try_into().unwrap()));
-    let alignment = u64::from(u16::from_le_bytes(header[32..34].try_into().unwrap()));
-    if bytes.is_empty() || bytes.len() > 2 * 1024 * 1024 || offset % alignment != 0
-        || bytes.len() as u64 % alignment != 0 || offset.saturating_add(bytes.len() as u64) > size {
-        return Err(AppError::Worker("invalid rendered audio chunk".into()));
-    }
-    let mut file = if offset == 0 {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        file.write_all(header)?;
-        file
-    } else {
-        let file = OpenOptions::new().read(true).append(true).open(path)?;
-        if file.metadata()?.len() != 44 + offset {
-            return Err(AppError::Worker("rendered audio chunk is out of order".into()));
-        }
-        use std::io::Read;
-        let mut actual_header = [0u8; 44];
-        (&file).read_exact(&mut actual_header)?;
-        if actual_header != *header {
-            return Err(AppError::Worker("rendered audio format changed".into()));
-        }
-        file
-    };
-    file.write_all(bytes)?;
-    let complete = offset + bytes.len() as u64 == size;
-    if complete { file.sync_all()?; }
-    Ok(complete)
-}
-
-fn cleanup_stale_editor_renders(
-    root: &Path,
-    now: std::time::SystemTime,
-    active: &std::collections::HashSet<String>,
-) -> std::io::Result<usize> {
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(error) => return Err(error),
-    };
-    let cutoff = now.checked_sub(std::time::Duration::from_secs(24 * 60 * 60))
-        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-    let mut removed = 0;
-    for entry in entries.take(256) {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !name.starts_with("editor_export_") || active.contains(&name)
-            || !entry.file_type()?.is_dir() || entry.metadata()?.modified()? > cutoff {
-            continue;
-        }
-        let mut recently_written = false;
-        for file in std::fs::read_dir(entry.path())? {
-            if std::fs::symlink_metadata(file?.path())?.modified()? > cutoff {
-                recently_written = true;
-                break;
-            }
-        }
-        if !recently_written {
-            std::fs::remove_dir_all(entry.path())?;
-            removed += 1;
-        }
-    }
-    Ok(removed)
-}
-
-#[tauri::command]
-pub async fn append_editor_export_render_chunk(
-    app: AppHandle, state: State<'_, AppState>, project_id: String, task_id: String, clip_index: u32,
-    sample_rate: u32, channels: u16, frames: u32, offset: u64, data_base64: String,
-) -> AppResult<Option<Value>> {
-    if data_base64.len() > 3 * 1024 * 1024 {
-        return Err(AppError::Worker("rendered audio chunk is too large".into()));
-    }
-    let directory = editor_export_render_dir(&app, &project_id, &task_id)?;
-    let header = float_wav_header(frames, sample_rate, channels)?;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data_base64)
-        .map_err(|error| AppError::Worker(format!("invalid rendered audio: {error}")))?;
-    let mut active = state.tasks.lock().map(|tasks| tasks.keys().cloned().collect::<std::collections::HashSet<_>>())
-        .unwrap_or_default();
-    active.insert(task_id);
-    tauri::async_runtime::spawn_blocking(move || -> AppResult<Option<Value>> {
-        if offset == 0 {
-            if let Err(error) = cleanup_stale_editor_renders(directory.parent().unwrap(), std::time::SystemTime::now(), &active) {
-                crate::session_log::early("WARN", "editor.exportCache", &format!("Unable to clean stale export audio: {error}"));
-            }
-        }
-        std::fs::create_dir_all(&directory)?;
-        let path = directory.join(format!("clip_{clip_index}.wav"));
-        if !append_rendered_audio(&path, &header, offset, &bytes)? { return Ok(None); }
-        Ok(Some(serde_json::json!({ "path": path.to_string_lossy(),
-            "duration": f64::from(frames) / f64::from(sample_rate),
-            "sampleRate": sample_rate, "channels": channels })))
-    }).await.map_err(|error| AppError::Worker(error.to_string()))?
-}
-
-#[tauri::command]
-pub async fn cleanup_editor_export_render(app: AppHandle, project_id: String, task_id: String) -> AppResult<()> {
-    let directory = editor_export_render_dir(&app, &project_id, &task_id)?;
-    match std::fs::remove_dir_all(directory) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
 }
 
 #[tauri::command]
@@ -3669,53 +3543,6 @@ mod tests {
         assert_eq!(u32::from_le_bytes(header[28..32].try_into().unwrap()), 96_000);
         assert_eq!(u16::from_le_bytes(header[34..36].try_into().unwrap()), 16);
         assert_eq!(u32::from_le_bytes(header[40..44].try_into().unwrap()), 96_000);
-    }
-
-    #[test]
-    fn editor_export_render_preserves_float_samples_and_chunk_order() {
-        let root = temp_test_dir("export-render");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("clip.wav");
-        let header = float_wav_header(2, 48_000, 2).unwrap();
-        assert_eq!(u16::from_le_bytes(header[20..22].try_into().unwrap()), 3);
-        assert_eq!(u16::from_le_bytes(header[34..36].try_into().unwrap()), 32);
-        let first: Vec<u8> = [1.25f32, -1.75].into_iter().flat_map(f32::to_le_bytes).collect();
-        let second: Vec<u8> = [0.123456f32, -0.000001].into_iter().flat_map(f32::to_le_bytes).collect();
-        assert!(!append_rendered_audio(&path, &header, 0, &first).unwrap());
-        assert!(append_rendered_audio(&path, &header, 0, &first).is_err());
-        assert!(append_rendered_audio(&path, &header, 16, &second).is_err());
-        assert!(append_rendered_audio(&path, &header, 8, &second).unwrap());
-        let bytes = fs::read(&path).unwrap();
-        assert_eq!(&bytes[..44], &header);
-        assert_eq!(&bytes[44..52], first.as_slice());
-        assert_eq!(&bytes[52..60], second.as_slice());
-        assert!(append_rendered_audio(&path, &header, 16, &first).is_err());
-        assert!(float_wav_header(u32::MAX, 48_000, 2).is_err());
-        assert!(float_wav_header(10, 1, 2).is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn editor_export_render_cleanup_keeps_active_and_recently_written_files() {
-        let root = temp_test_dir("export-render-cleanup");
-        let stale = root.join("editor_export_stale");
-        let active_dir = root.join("editor_export_active");
-        let recent = root.join("editor_export_recent");
-        let unrelated = root.join("user_files");
-        for path in [&stale, &active_dir, &recent, &unrelated] {
-            fs::create_dir_all(path).unwrap();
-            fs::write(path.join("clip.wav"), b"audio").unwrap();
-        }
-        let future = SystemTime::now() + std::time::Duration::from_secs(48 * 60 * 60);
-        fs::File::options().write(true).open(recent.join("clip.wav")).unwrap()
-            .set_times(fs::FileTimes::new().set_modified(future)).unwrap();
-        let protected = std::collections::HashSet::from(["editor_export_active".to_string()]);
-        assert_eq!(cleanup_stale_editor_renders(&root, future, &protected).unwrap(), 1);
-        assert!(!stale.exists());
-        assert!(active_dir.join("clip.wav").exists());
-        assert!(recent.join("clip.wav").exists());
-        assert!(unrelated.join("clip.wav").exists());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

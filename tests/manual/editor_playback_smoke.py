@@ -128,7 +128,6 @@ def main():
                 page.evaluate("""() => {
                     editor.session.tracks[0].volume = 0.3
                     editor.session.tracks[1].pan = -0.4
-                    editor.session.tracks[1].effects = { reverb: 0.2, delay: 0, delayTime: 0.24, clarity: 0.3, compressor: 0 }
                 }""")
                 page.wait_for_timeout(150)
                 adjusted = page.evaluate("sample()")

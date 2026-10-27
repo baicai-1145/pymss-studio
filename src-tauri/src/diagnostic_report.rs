@@ -900,12 +900,6 @@ pub(crate) fn summarize_request(command: &str, payload: &Value) -> Value {
                             ],
                         );
                         item["clipCount"] = json!(collection_len(track.get("clips")));
-                        if let Some(effects) = track.get("effects") {
-                            item["effects"] = summary.pick(
-                                effects,
-                                &["reverb", "delay", "delayTime", "clarity", "compressor"],
-                            );
-                        }
                         item
                     })
                     .collect();
@@ -1518,10 +1512,9 @@ mod tests {
             &json!({"taskId": "mix", "format": "flac", "audioParams": {"sampleRate": 48000}, "project": {"id": "p", "sources": [{"path": "/private/file"}], "tracks": [{"id": "1", "effects": {"reverb": 0.3}, "clips": [{"duration": 3}]}]}}),
         );
         assert_eq!(export["project"]["clipCount"], 1);
-        assert_eq!(
-            export["project"]["tracks"]["items"][0]["effects"]["reverb"],
-            0.3
-        );
+        assert!(export["project"]["tracks"]["items"][0]
+            .get("effects")
+            .is_none());
         let runtime = summarize_request(
             "update_runtime_core",
             &json!({"backend": "rocm", "mode": "sync", "prepareOnly": true, "planId": "plan", "proxyUrl": "private"}),

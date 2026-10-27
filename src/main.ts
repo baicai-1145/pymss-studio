@@ -1,3 +1,4 @@
+import { pluginHostCapabilities } from '@/utils/pluginHost'
 import { createLogger } from '@/utils/logger'
 import { createApp, nextTick } from 'vue'
 import { createPinia } from 'pinia'
@@ -66,7 +67,8 @@ async function bootstrap() {
       studioLog.warn('Failed to connect editor export preferences', error)
     }
   }
-  await updates.initialize().catch((error) => {
+  const pluginHost = await pluginHostCapabilities()
+  if (pluginHost.labBuild !== true) await updates.initialize().catch((error) => {
     studioLog.warn('Failed to initialize update store', error)
   })
   const tasks = await import('@/stores/task').then((mod) => mod.useTaskStore(pinia))
@@ -139,7 +141,7 @@ async function bootstrap() {
   }).catch((error) => {
     studioLog.warn('Failed to load runtime info', error)
   })
-  void updates.checkForUpdates().catch((error) => {
+  if (pluginHost.labBuild !== true) void updates.checkForUpdates().catch((error) => {
     studioLog.warn('Failed to check for updates', error)
   })
 }

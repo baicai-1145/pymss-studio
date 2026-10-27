@@ -136,7 +136,7 @@ jobs:
               }
           }))
           PY
-          pnpm tauri build --bundles app --config src-tauri/tauri.bundle.resources.json
+          pnpm plugins:build --bundles app --config src-tauri/tauri.bundle.resources.json
 
       - name: Re-sign bundled macOS app after embedding runtime
         run: |
@@ -254,6 +254,7 @@ jobs:
           PATH="$ISOLATED_PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONHOME="$RESOURCE_ROOT/python-runtime" "$ENV_PY" "$WORKER" list_models --payload "{}"
           PATH="$ISOLATED_PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONHOME="$RESOURCE_ROOT/python-runtime" "$ENV_PY" "$(dirname "$WORKER")/runtime_audio_probe.py" --check-core
           codesign --verify --deep --strict --verbose=4 "$APP"
+          python3 scripts/verify-native-plugins.py "$APP" --platform macos
 
       - name: Verify core overlays survive signed bundle replacement and rollback
         run: |

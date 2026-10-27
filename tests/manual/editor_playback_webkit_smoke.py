@@ -272,16 +272,6 @@ window.run = async () => {
           fadeIn: index === 17 ? 0 : clip.duration,
           fadeOut: index === 17 ? 0 : clip.duration };
       }
-      if (index === 10) {
-        editor.session.tracks[0].effects = {
-          reverb: 0.2, delay: 0.1, delayTime: 0.24, clarity: 0.3, compressor: 0.2,
-        };
-      }
-      if (index === 15) {
-        editor.session.tracks[0].effects = {
-          reverb: 0, delay: 0, delayTime: 0.24, clarity: 0, compressor: 0,
-        };
-      }
       await wait(400);
       send({ wall: performance.now() / 1000, time: playback.currentTime.value,
         status: playback.status.value, error: playback.playbackError.value,

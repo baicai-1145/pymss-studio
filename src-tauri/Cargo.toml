@@ -4,6 +4,11 @@ version = "0.0.12"
 edition = "2021"
 authors = ["TheSmallHanCat"]
 
+[features]
+default = ["native-plugins"]
+native-plugins = ["dep:pymss-audio-host"]
+vst-lab = ["native-plugins"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -30,9 +35,11 @@ minisign-verify = "0.2"
 semver = "1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 rustfft = "6.4"
+sha2 = "0.10"
+pymss-audio-host = { path = "../native/audio-host", optional = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -40,9 +47,6 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 flate2 = "1"
 tar = "0.4"
-
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
-sha2 = "0.10"
 
 [dev-dependencies]
 flate2 = "1"

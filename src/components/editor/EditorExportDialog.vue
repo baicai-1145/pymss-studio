@@ -11,6 +11,7 @@ const props = defineProps<{
   exporting: boolean
   exportCancelling: boolean
   exportProgress: number
+  exportProgressIndeterminate?: boolean
   exportProgressText: string
   format: EditorExportFormat
   wavBitDepth: string
@@ -96,9 +97,11 @@ const exportSummaryRows = computed(() => [
       <div v-if="exporting" class="export-dialog__progress">
         <div class="export-dialog__progress-copy">
           <span>{{ exportProgressText || t('editor.exporting') }}</span>
-          <strong>{{ exportProgress }}%</strong>
+          <strong v-if="!exportProgressIndeterminate">{{ exportProgress }}%</strong>
+          <n-spin v-else :size="14" :aria-label="t('editor.exporting')" />
         </div>
-        <n-progress type="line" :percentage="exportProgress" :show-indicator="false" status="info" />
+        <n-progress v-if="!exportProgressIndeterminate" type="line" :percentage="exportProgress" :show-indicator="false" status="info" />
+        <n-skeleton v-else :height="8" :sharp="false" />
       </div>
 
       <div class="export-dialog__grid">

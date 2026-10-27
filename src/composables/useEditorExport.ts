@@ -138,6 +138,7 @@ export function useEditorExport(options: UseEditorExportOptions) {
       })
       editor.exportFormat = format
       message.success(t('editor.exported', { path: result.path }))
+      if (result.pluginTailLimited) message.warning(t('editor.plugins.tailLimited'), { duration: 10000 })
       try {
         await settings.saveEditorExportPreference({ format, bitDepth: format === 'wav' ? wavBitDepth : flacBitDepth })
       } catch (error) {

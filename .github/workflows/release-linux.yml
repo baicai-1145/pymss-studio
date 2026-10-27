@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libwebkit2gtk-4.1-dev libssl-dev \
+            build-essential pkg-config libasound2-dev libwebkit2gtk-4.1-dev libssl-dev \
             libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf file \
             libfuse2 squashfs-tools ffmpeg aria2 gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
@@ -86,7 +86,7 @@ jobs:
           Path('src-tauri/tauri.bundle.resources.json').write_text(json.dumps(config))
           PY
           mkdir -p "$RUNNER_TEMP/pymss-linux-build"
-          pnpm tauri build --verbose --bundles appimage --config src-tauri/tauri.bundle.resources.json 2>&1 \
+          pnpm plugins:build --verbose --bundles appimage --config src-tauri/tauri.bundle.resources.json 2>&1 \
             | tee "$RUNNER_TEMP/pymss-linux-build/appimage-build.log"
       - name: Upload AppImage failure log
         if: failure()

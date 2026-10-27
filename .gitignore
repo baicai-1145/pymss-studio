@@ -82,3 +82,9 @@ src-tauri/tauri.bundle.resources.json
 .uv-cache/
 .tmp/
 .pi/herdr-team/
+
+# Isolated native audio experiments
+native/target/
+native/vendor/soundcraft-vst3-host/tests/fixture/target/
+data-vst-lab/
+.cache/

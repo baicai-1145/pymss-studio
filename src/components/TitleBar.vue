@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { createLogger } from '@/utils/logger'
 
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useDialog, useMessage } from 'naive-ui'
+import { NButton, useDialog, useMessage } from 'naive-ui'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { invoke } from '@tauri-apps/api/core'
 import AppBrandMark from '@/components/AppBrandMark.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useTaskStore } from '@/stores/task'
-import { runWindowCloseGuards } from '@/utils/windowCloseGuards'
+import { runWindowCloseGuards, type WindowClosePersistenceError, type WindowCloseRecovery } from '@/utils/windowCloseGuards'
 
 const studioLog = createLogger('ui.components.TitleBar')
 
@@ -26,6 +26,7 @@ const isMaximized = ref(false)
 const closeInProgress = ref(false)
 const allowForcedClose = ref(false)
 const closeDialogOpen = ref(false)
+let closeRecoveryCancelled = false
 
 const pageTitle = computed(() => t(`nav.${String(route.name || 'home').startsWith('workflow-') ? 'workflows' : String(route.name || 'home')}`))
 const isMainWindow = computed(() => !appWindow || appWindow.label === 'main')
@@ -60,10 +61,44 @@ async function toggleMaximize() {
   }
 }
 
+function confirmPersistenceFailure(error: WindowClosePersistenceError) {
+  return new Promise<WindowCloseRecovery>(resolve => {
+    let settled = false
+    const finish = (action: WindowCloseRecovery) => {
+      if (settled) return
+      settled = true
+      closeRecoveryCancelled = action === 'cancel'
+      closeDialogOpen.value = false
+      prompt.destroy()
+      resolve(action)
+    }
+    closeDialogOpen.value = true
+    const prompt = dialog.warning({
+      title: t('tasks.closeSaveFailedTitle'),
+      content: () => h('div', [
+        h('p', t('tasks.closeSaveFailedContent')),
+        h('p', { style: 'white-space: pre-wrap; overflow-wrap: anywhere' }, error.message),
+      ]),
+      action: () => h('div', { style: 'display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end', onKeydown: (event: KeyboardEvent) => {
+        event.stopPropagation()
+        if (event.key === 'Escape') { event.preventDefault(); finish('cancel') }
+      } }, [
+        h(NButton, { onClick: () => finish('cancel') }, { default: () => t('common.continueUsing') }),
+        h(NButton, { type: 'error', secondary: true, onClick: () => finish('discard') }, { default: () => t('tasks.discardAndClose') }),
+        h(NButton, { type: 'primary', onClick: () => finish('retry') }, { default: () => t('tasks.retrySaveAndClose') }),
+      ]),
+      onClose: () => finish('cancel'),
+      onMaskClick: () => finish('cancel'),
+      onEsc: () => finish('cancel'),
+    })
+  })
+}
+
 async function performWindowClose() {
   if (!appWindow) return false
+  closeRecoveryCancelled = false
   try {
-    await runWindowCloseGuards()
+    await runWindowCloseGuards(confirmPersistenceFailure)
   } catch (error) {
     studioLog.warn('[title-bar] window close guard failed', error)
     return false
@@ -127,14 +162,14 @@ async function cancelTasksAndClose() {
       }
       const forced = await performWindowClose()
       if (!forced) {
-        message.error(t('tasks.closeForceFailed'))
+        if (!closeRecoveryCancelled) message.error(t('tasks.closeForceFailed'))
         closeInProgress.value = false
       }
       return
     }
     const closed = await performWindowClose()
     if (!closed) {
-      message.error(t('tasks.closeFailed'))
+      if (!closeRecoveryCancelled) message.error(t('tasks.closeFailed'))
       closeInProgress.value = false
     }
   } catch {
@@ -155,7 +190,7 @@ async function requestClose() {
     closeInProgress.value = true
     const closed = await performWindowClose()
     if (!closed) {
-      message.error(t('tasks.closeFailed'))
+      if (!closeRecoveryCancelled) message.error(t('tasks.closeFailed'))
       closeInProgress.value = false
     }
     return

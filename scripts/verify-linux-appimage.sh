@@ -32,6 +32,7 @@ done < <(find "$RESOURCES/python-runtime" -type f -print0)
 export LD_LIBRARY_PATH="$APPDIR/usr/lib:$APPDIR/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 export PATH="$RESOURCES/bin:/usr/bin:/bin"
 unset PYTHONHOME PYTHONPATH
+python3 scripts/verify-native-plugins.py "$APPDIR/usr/bin/pymss-studio" --platform linux
 for tool in ffmpeg ffprobe aria2c; do
   test -x "$RESOURCES/bin/$tool"
   if ldd "$RESOURCES/bin/$tool" | grep -q 'not found'; then

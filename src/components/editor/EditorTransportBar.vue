@@ -509,6 +509,18 @@ function clearTransportPressed() {
   justify-content: flex-end;
 }
 
+@container editor-shell (max-width: 1100px) {
+  .editor-transport__brand { flex: 1 1 140px; }
+  .editor-transport__center { grid-template-columns: auto auto max-content; gap: 8px; }
+  .editor-transport__actions { gap: 6px; }
+}
+
+@container editor-shell (max-width: 900px) {
+  .editor-transport__brand { flex-basis: 35%; }
+  .editor-transport__actions { flex: 1 0 auto; }
+  .editor-transport__center { order: 1; flex: 1 0 100%; justify-content: center; }
+}
+
 .transport-chip,
 .transport-play,
 .transport-record {

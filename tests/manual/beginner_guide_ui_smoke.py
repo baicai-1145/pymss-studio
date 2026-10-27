@@ -201,18 +201,12 @@ with sync_playwright() as playwright:
     screenshot(page, 'real-ui-editor.png')
     go(child, 'editorClips')
     expect(child.locator('.track-row__lane').first).to_be_visible()
-    child.evaluate('''()=>{
-      const editor=document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('editor');
-      const track=editor.session.tracks.find(track=>!track.muted);
-      editor.setTrackEffects(track.id,{reverb:.1});
-    }''')
     go(child, 'editorExport')
     expect(child.locator('.editor-export-modal')).to_be_visible()
     screenshot(page, 'real-ui-editor-export.png')
     child.locator('.editor-export-modal .export-dialog__footer').get_by_role('button').last.click()
     expect(child.locator('.editor-export-modal')).not_to_be_visible()
-    assert 'append_editor_export_render_chunk' in child.evaluate('__tutorialRuntime.commands')
-    child.wait_for_function('__tutorialRuntime.commands.includes("cleanup_editor_export_render")')
+    child.wait_for_function('__tutorialRuntime.commands.includes("start_editor_mix_export")')
     assert snapshot(page) == before
 
     # Follow real workflow controls, including returning through browser history.

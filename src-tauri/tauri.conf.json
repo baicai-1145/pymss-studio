@@ -61,7 +61,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "14.0.0"
+      "minimumSystemVersion": "14.0.0",
+      "entitlements": "entitlements.plugins.plist"
     },
     "publisher": "TheSmallHanCat"
   },

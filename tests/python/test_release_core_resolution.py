@@ -22,7 +22,14 @@ class ReleaseCoreResolutionTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.path = self.root / "manifest.json"
-        self.path.write_text(json.dumps(MANIFEST), encoding="utf-8")
+        self.manifest = copy.deepcopy(MANIFEST)
+        # Offline wheel fixtures use fixed versions, independent of release pins.
+        self.manifest["python"] = "3.12"
+        self.manifest["common"].update({
+            "pymss": "pymss[proxy]==2.1.8",
+            "pymss-core": "pymss-core==0.1.11",
+        })
+        self.path.write_text(json.dumps(self.manifest), encoding="utf-8")
 
     def test_real_resolver_selects_newest_stable_python_compatible_wheels(self):
         for name, versions in (
@@ -53,7 +60,7 @@ class ReleaseCoreResolutionTests(unittest.TestCase):
         with mock.patch.object(CORE.subprocess, "run", side_effect=offline_run):
             versions = CORE.resolve_manifest(self.path)
         self.assertEqual(versions, {"pymss": "2.1.9", "pymss-core": "0.1.11"})
-        expected = copy.deepcopy(MANIFEST)
+        expected = copy.deepcopy(self.manifest)
         expected["common"]["pymss"] = "pymss[proxy]==2.1.9"
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), expected)
 
@@ -92,7 +99,7 @@ class ReleaseCoreResolutionTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), original)
 
     def test_verification_rejects_a_stale_or_missing_bundled_core(self):
-        manifest = copy.deepcopy(MANIFEST)
+        manifest = copy.deepcopy(self.manifest)
         manifest["common"]["pymss"] = "pymss[proxy]==2.1.9"
         self.path.write_text(json.dumps(manifest), encoding="utf-8")
         for version in ("2.1.8", None, "2.1.9"):

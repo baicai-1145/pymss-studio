@@ -32,7 +32,7 @@ const vite = await createServer({
     name: 'editor-slider-sfc',
     async transform(code, id) {
       const path = id.replaceAll('\\', '/')
-      if (!path.endsWith('/src/components/editor/EditorParameterSlider.vue')) return null
+      if (!['EditorParameterSlider.vue', 'EditorMasterLimiter.vue'].some(name => path.endsWith(`/src/components/editor/${name}`))) return null
       const { descriptor } = parse(code, { filename: path })
       const script = compileScript(descriptor, { id: 'editor-parameter-slider-test', inlineTemplate: true })
       return transformWithEsbuild(script.content, `${path}.ts`, { loader: 'ts', tsconfigRaw: {} })
@@ -41,6 +41,8 @@ const vite = await createServer({
 })
 after(async () => { await vite.close(); await browser.happyDOM.abort() })
 const Slider = (await vite.ssrLoadModule('/src/components/editor/EditorParameterSlider.vue')).default
+const Limiter = (await vite.ssrLoadModule('/src/components/editor/EditorMasterLimiter.vue')).default
+const { useEditorShortcuts } = await vite.ssrLoadModule('/src/composables/useEditorShortcuts.ts')
 const { useEditorStore } = await vite.ssrLoadModule('/src/stores/editor.ts')
 const i18n = (await vite.ssrLoadModule('/src/i18n/index.ts')).default
 
@@ -49,10 +51,6 @@ const parameters = [
   { name: 'master-pan', reset: 0, min: -1, max: 1, get: s => s.masterPan, set: (s, v) => s.setMasterPan(v) },
   { name: 'track-volume', reset: 1, min: 0, max: 2, get: s => s.session.tracks[0].volume, set: (s, v) => s.setTrackVolume('track', v) },
   { name: 'track-pan', reset: 0, min: -1, max: 1, get: s => s.session.tracks[0].pan, set: (s, v) => s.setTrackPan('track', v) },
-  ...['clarity', 'compressor', 'reverb', 'delay'].map(key => ({
-    name: key, reset: 0, min: 0, max: 1,
-    get: s => s.session.tracks[0].effects[key], set: (s, v) => s.setTrackEffects('track', { [key]: v }),
-  })),
 ]
 const flush = async () => { await nextTick(); await new Promise(resolve => setImmediate(resolve)); await nextTick() }
 const resetLabel = spec => spec.reset === 1 ? '100%' : spec.min < 0 ? 'Center' : '0%'
@@ -65,8 +63,7 @@ async function mountSliders(t, specs = [parameters[0]], { disabled = false, valu
     id: 'slider-project', name: 'Project', masterVolume: value, masterPan: value,
     sources: [], createdAt: 1, updatedAt: 1,
     tracks: [{ id: 'track', name: 'Track', role: 'stem', volume: value, pan: value,
-      muted: false, solo: false, fadeIn: 0, fadeOut: 0, clips: [],
-      effects: { clarity: value, compressor: value, reverb: value, delay: value, delayTime: 0.24 } }],
+      muted: false, solo: false, fadeIn: 0, fadeOut: 0, clips: [] }],
   }
   store.clearHistory()
   const visible = ref(true)
@@ -111,7 +108,67 @@ async function doubleClick(target, x) {
   await mouse(target, 'dblclick', x, 2)
 }
 
-test('Default buttons reset all eight parameters atomically and expose the target to assistive technology', async t => {
+test('limiter switch Space activation preserves playback while the editor background retains its shortcut', async t => {
+  for (const initiallyPlaying of [false, true]) {
+    await t.test(initiallyPlaying ? 'playing' : 'paused', async t => {
+      let playing = initiallyPlaying
+      let playbackToggles = 0
+      const value = ref({ enabled: false })
+      const updates = []
+      const noop = () => {}
+      const container = document.createElement('div')
+      document.body.append(container)
+      const app = createApp({
+        setup() {
+          useEditorShortcuts({
+            togglePlay: () => { playing = !playing; playbackToggles++ },
+            stop: noop, undo: noop, redo: noop, zoomIn: noop, zoomOut: noop, save: noop,
+            toHome: noop, seek: noop, toggleMute: noop, toggleSolo: noop, removeTrack: noop,
+          })
+          return () => h('div', [
+            h('div', { class: 'editor-background', tabindex: 0 }),
+            h(Limiter, { value: value.value, onUpdate: patch => {
+              updates.push(patch)
+              value.value = { ...value.value, ...patch }
+            } }),
+          ])
+        },
+      })
+      app.use(i18n).component('NSlider', NSlider)
+        .component('NSwitch', naive.NSwitch || naive.default.NSwitch)
+        .component('NInputNumber', naive.NInputNumber || naive.default.NInputNumber).mount(container)
+      t.after(() => { app.unmount(); container.remove() })
+      await flush()
+      const toggle = container.querySelector('[role="switch"]')
+      assert.ok(toggle)
+      toggle.focus()
+      assert.equal(document.activeElement, toggle)
+      for (const repeat of [false, true]) {
+        toggle.dispatchEvent(new browser.KeyboardEvent('keydown', { key: ' ', code: 'Space', repeat, bubbles: true, cancelable: true }))
+      }
+      assert.equal(value.value.enabled, false, 'the switch activates on keyup')
+      toggle.dispatchEvent(new browser.KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true, cancelable: true }))
+      await flush()
+      assert.equal(toggle.getAttribute('aria-checked'), 'true')
+      assert.deepEqual(updates, [{ enabled: true }])
+      assert.equal(playbackToggles, 0, 'Space and key repeats must not reach the transport shortcut')
+      assert.equal(playing, initiallyPlaying)
+      toggle.click()
+      await flush()
+      assert.equal(value.value.enabled, false, 'mouse activation remains available')
+      assert.equal(playbackToggles, 0)
+      const background = container.querySelector('.editor-background')
+      background.focus()
+      background.dispatchEvent(new browser.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }))
+      await flush()
+      assert.equal(playbackToggles, 1)
+      assert.equal(playing, !initiallyPlaying)
+      assert.equal(value.value.enabled, false)
+    })
+  }
+})
+
+test('Default buttons reset every mixer parameter atomically and expose the target to assistive technology', async t => {
   for (const parameter of parameters) {
     await t.test(parameter.name, async t => {
       const env = await mountSliders(t, [parameter])

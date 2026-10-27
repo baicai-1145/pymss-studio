@@ -22,6 +22,9 @@ from worker_protocol import emit, emit_error
 from worker_proxy import effective_proxy_url
 
 
+_UNFETCHED_FILE_INDEX = object()
+
+
 def _emit_download_log(task_id: str | None, level: str, message: str, **extra: Any) -> None:
     payload: dict[str, Any] = {"level": level, "message": message}
     payload.update(extra)
@@ -42,6 +45,18 @@ def _normalize_download_method(value: Any) -> str:
 def _should_fallback_from_aria2_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return "aria2c" in message or "ossl_provider" in message or "provider_load" in message
+
+
+def _require_index_for_cached_files(files: list[tuple[str, Path]], index: Any, *, force: bool) -> None:
+    """Do not certify pre-existing model files when the metadata lookup failed."""
+    if index is not None or force:
+        return
+    for _relpath, dest in files:
+        if dest.is_file():
+            raise RuntimeError(
+                f"Cannot verify cached file {dest.name}: the file index is unavailable. "
+                "Retry when metadata is available or force a fresh download."
+            )
 
 
 def _download_file_with_aria2_env(
@@ -99,6 +114,7 @@ def download_studio_model(
     progress_callback: Any = None,
     proxy: str | None = None,
     task_id: str | None = None,
+    file_index: Any = _UNFETCHED_FILE_INDEX,
 ) -> dict[str, Any]:
     """Download studio-resolved files through pymss's downloader.
 
@@ -112,7 +128,18 @@ def download_studio_model(
     already_valid = pymss_download._already_valid
     expected_size_and_hash = pymss_download._expected_size_and_hash
     fetch_index = pymss_download.fetch_modelscope_file_index
-    index = fetch_index(timeout=timeout, proxy=proxy) if verify and endpoint is None else None
+    index = None
+    if verify and endpoint is None:
+        if file_index is not _UNFETCHED_FILE_INDEX:
+            # Reuse the command's lookup, including an unavailable index, so progress
+            # and validation use the same metadata without a second network request.
+            index = file_index
+        else:
+            try:
+                index = fetch_index(timeout=timeout, proxy=proxy)
+            except Exception as exc:
+                _emit_download_log(task_id, "warning", f"File index unavailable; published size/hash metadata cannot be used: {exc}")
+        _require_index_for_cached_files(files, index, force=force)
     downloaded: list[str] = []
     skipped: list[str] = []
 
@@ -125,6 +152,23 @@ def download_studio_model(
         download_file_params = inspect.signature(download_file).parameters
         if "progress_callback" in download_file_params:
             download_kwargs["progress_callback"] = progress_callback
+            if progress_callback is not None:
+                file_done = 0
+
+                def on_file_progress(done: int, total: int, message: str) -> None:
+                    nonlocal file_done
+                    # Retrying this file must not look like a new file to the model adapter.
+                    file_done = max(file_done, done)
+                    try:
+                        progress_callback(file_done, total, message)
+                    except Exception:
+                        # Match pymss's callback isolation; BaseException cancellation still propagates.
+                        pass
+
+                download_kwargs["progress_callback"] = on_file_progress
+                # This is the actual file boundary, even if the downloader's first
+                # callback already contains bytes. Retrying below keeps this wrapper.
+                on_file_progress(0, int(expected_size or 0), relpath)
         if "proxy" in download_file_params:
             download_kwargs["proxy"] = proxy
         url = remote_url(relpath, source=source, endpoint=endpoint)
@@ -216,6 +260,8 @@ def _watch_download_progress(
     # Held across iterations: the window only closes every few polls, and a rate recomputed from
     # scratch each time would report zero on every poll in between.
     speed = 0.0
+    sizes = [expected_sizes.get(str(dest), 0) for _relpath, dest in files]
+    total_sum = sum(sizes) if all(size > 0 for size in sizes) else 0
 
     while not stop.is_set():
         downloaded_by_file: dict[str, int] = {}
@@ -241,8 +287,6 @@ def _watch_download_progress(
                 downloaded_by_file[key] = 0
 
         downloaded_sum = sum(downloaded_by_file.values())
-        total_sum = sum(expected_sizes.get(str(dest), 0) for _relpath, dest in files)
-
         now = time.monotonic()
         elapsed = now - window_started_at
         if window_start_bytes < 0:
@@ -355,15 +399,17 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
             "completedFiles": 0,
             "progress": 0,
         }, task_id=task_id)
-        emit("download_stage", {"stage": "resolving_files", "progress": 5}, task_id=task_id)
+        emit("download_stage", {"stage": "resolving_files", "progress": 0}, task_id=task_id)
 
-        # The file index carries the published sizes, which is what turns a byte count into a
-        # percentage. Its absence is not fatal — progress then falls back to counting files.
+        # Fresh downloads can fall back to file counts when index metadata is unavailable.
+        # Existing cache files require a successful lookup unless a fresh download is forced.
         index = None
         try:
             index = fetch_modelscope_file_index(timeout=timeout, proxy=effective_proxy_url()) if endpoint is None else None
         except Exception as exc:
-            _emit_download_log(task_id, "warning", f"File index unavailable, progress will be approximate: {exc}")
+            _emit_download_log(task_id, "warning", f"File index unavailable; published progress and validation metadata cannot be used: {exc}")
+        if endpoint is None:
+            _require_index_for_cached_files(files, index, force=force)
 
         expected_sizes: dict[str, int] = {}
         already_done: set[str] = set()
@@ -372,6 +418,8 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
             expected_sizes[str(dest)] = int(expected_size or 0)
             if not force and _already_valid(dest, expected_size, expected_sha256):
                 already_done.add(str(dest))
+                if not expected_sizes[str(dest)]:
+                    expected_sizes[str(dest)] = dest.stat().st_size
             _emit_download_log(
                 task_id,
                 "info",
@@ -381,6 +429,8 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
 
         last_emitted_progress = -1
         last_emitted_files = -1
+        last_emitted_metrics: tuple[int, int, float] | None = None
+        last_emitted_at = 0.0
 
         def emit_progress(
             *,
@@ -388,19 +438,24 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
             total_bytes: int,
             completed_files: int,
             speed_bytes_per_second: float,
+            force: bool = False,
         ) -> None:
-            nonlocal last_emitted_progress, last_emitted_files
+            nonlocal last_emitted_progress, last_emitted_files, last_emitted_metrics, last_emitted_at
             if total_bytes > 0:
-                progress = min(95, max(8, int(downloaded_bytes / total_bytes * 95)))
+                progress = min(95, int(downloaded_bytes / total_bytes * 95))
             else:
-                progress = min(95, max(8, int((completed_files / total_files) * 95)))
-            # Byte counts move constantly, and pymss's callback can fire several times a second
-            # on a fast link. Only re-emit when the bar would actually change or a file finishes,
-            # so the UI is not woken for updates it would render identically.
+                progress = min(95, int((completed_files / total_files) * 95))
+            metrics = (downloaded_bytes, total_bytes, speed_bytes_per_second)
+            now = time.monotonic()
+            # Without a known total, byte/speed labels change even when the bar does not.
+            # Sample those changes once a second; bar and file transitions remain immediate.
             if progress == last_emitted_progress and completed_files == last_emitted_files:
-                return
+                if metrics == last_emitted_metrics or (not force and now - last_emitted_at < 1.0):
+                    return
             last_emitted_progress = progress
             last_emitted_files = completed_files
+            last_emitted_metrics = metrics
+            last_emitted_at = now
             emit("download_progress", {
                 "model": entry.name,
                 "completedFiles": completed_files,
@@ -413,25 +468,19 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
 
         emit("download_stage", {
             "stage": "downloading_files",
-            "progress": 8,
+            "progress": 0,
             "message": "Downloading model files",
         }, task_id=task_id)
 
         # Where the progress numbers come from depends on what the installed pymss can tell us.
         # Asking it directly is exact; watching the files it writes is a fallback, and how much
         # that fallback can say depends on which downloader pymss picks.
-        download_kwargs: dict[str, Any] = {
-            "model_dir": model_dir,
-            "source": source,
-            "endpoint": endpoint,
-            "force": force,
-            "timeout": timeout,
-        }
+        progress_callback = None
         if _pymss_reports_progress(download_model):
-            download_kwargs["progress_callback"] = _make_pymss_progress_adapter(
+            progress_callback = _make_pymss_progress_adapter(
                 skipped_bytes=sum(expected_sizes.get(key, 0) for key in already_done),
                 skipped_files=len(already_done),
-                total_bytes=sum(expected_sizes.values()),
+                total_bytes=sum(expected_sizes.values()) if all(size > 0 for size in expected_sizes.values()) else 0,
                 emit_progress=emit_progress,
             )
         else:
@@ -458,10 +507,12 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
             endpoint=endpoint,
             force=force,
             timeout=timeout,
-            progress_callback=download_kwargs.get("progress_callback"),
+            progress_callback=progress_callback,
             proxy=effective_proxy_url(),
             task_id=task_id,
+            file_index=index,
         )
+        settled_bytes = sum(expected_sizes.get(str(dest), 0) or dest.stat().st_size for _relpath, dest in files)
     except KeyError as exc:
         # An unknown model name is the caller's mistake, not a transfer failure, and the UI tells
         # the two apart by this code.
@@ -476,12 +527,12 @@ def cmd_download_model(payload: dict[str, Any]) -> int:
     # A file is only known to be finished once the next one starts, so the last file of the set
     # is still counted as in flight when the call returns. Settle the count before the UI reads
     # it for the last time.
-    settled_bytes = sum(expected_sizes.values())
     emit_progress(
         downloaded_bytes=settled_bytes,
         total_bytes=settled_bytes,
         completed_files=total_files,
         speed_bytes_per_second=0.0,
+        force=True,
     )
 
     downloaded = [str(item) for item in (result.get("downloaded") or [])]

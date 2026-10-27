@@ -73,27 +73,18 @@ test('storage statistics describe sample files without inspecting the real model
   assert.notEqual((await runtime.invoke('get_model_storage_summary')).models[0].name, summary.models[0].name)
 })
 
-test('effect export uses only sample render paths and completes through the tutorial runtime', async t => {
+test('mix export completes through the tutorial runtime', async t => {
   for (const platform of ['win32', 'darwin']) {
     const runtime = createDemoRuntime({ ...config, platform })
     t.after(() => runtime.dispose())
     const events = []
     const handler = runtime.callback(event => events.push(event.payload))
     await runtime.invoke('plugin:event|listen', { event: 'pymss://worker-event', handler })
-    const rendered = await runtime.invoke('append_editor_export_render_chunk', {
-      projectId: 'edit_sample-separation', taskId: 'editor_export_sample', clipIndex: 0,
-      frames: 1, sampleRate: 48000, channels: 2, offset: 0, dataBase64: 'AAAAAAAAAAA=',
-    })
-    assert.equal(rendered.duration, 1 / 48000)
-    assert.equal(rendered.sampleRate, 48000)
-    assert.equal(rendered.channels, 2)
-    assert.ok(runtime.assetUrl(rendered.path).startsWith('blob:'))
     assert.equal((await runtime.invoke('start_editor_mix_export', {
       payload: { taskId: 'editor_export_sample', format: 'wav' },
     })).started, true)
     await new Promise(resolve => setTimeout(resolve, 350))
     assert.ok(events.some(event => event.type === 'editor_mix_exported' && event.taskId === 'editor_export_sample'))
-    await runtime.invoke('cleanup_editor_export_render', { projectId: 'edit_sample-separation', taskId: 'editor_export_sample' })
     assert.deepEqual(runtime.unknown, [])
   }
 })
